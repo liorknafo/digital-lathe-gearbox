@@ -59,7 +59,7 @@
   </div>
   <div class="status" id="status">loading…</div>
   <div class="note">Measured / from the CAD: the whole gear-end drive, the door and its windows, the control box (exported from
-    <code>cad/control_box.scad</code>). Drawn from the photos, approximate: the lathe itself, its stand, the electrical box layout and the
+    <code>cad/designs/control_box_assembly.sc</code>). Drawn from the photos, approximate: the lathe itself, its stand, the electrical box layout and the
     cable runs. The ELS and the screen run the real firmware core; the lathe's own door switch stops the spindle when the gear door opens.</div>
   <div class="legend" id="legend"></div>
 </div>
@@ -78,14 +78,14 @@ const DATA = /*__DATA__*/null;
 const N = DATA.nums;
 // Frame (mm), same as the CAD: origin = leadscrew axis at the gear end, +X = towards the operator (front of the lathe), +Y = up,
 // +Z = out of the gear end. The lathe runs along -Z: headstock, chuck, bed, tailstock.
-const PITCH = 3;              // leadscrew pitch (mm), firmware/include/lathe_config.h
-const MOTOR_LEN = 75;         // chosen motor: Leadshine 57CME13 (~75 mm), docs/BOM.md
+const PITCH = N.pitch;        // leadscrew pitch (mm), from firmware/include/lathe_config.h (the firmware drives the carriage)
+const MOTOR_LEN = N.motor_len; // motor length incl. its encoder cover: cad/params.json motor_len
 const CENTRE_H = 110;         // lathe centre height above the bed (spec)
 const SP = N.spindle, BED_Y = SP[1] - CENTRE_H;
 const Z_HEAD = -285;          // headstock casting ends here (chuck side)
 const Z_BED_END = -1095;
 const Z_TOOL0 = -520;         // tool Z when the firmware's carriage position is 0 (the work is 190 mm out of the chuck)
-const GLAND_Z = 42;           // control box: PG7 glands, distance from the front rim (cad/params.scad gland_z)
+const GLAND_Z = N.gland_z;    // control box: PG7 glands, distance from the front rim (cad/params.json gland_z)
 
 // ---------------------------------------------------------------- renderer
 const stage = document.getElementById('stage');
@@ -183,13 +183,13 @@ function decode(m) {
   return g;
 }
 
-// ---------------------------------------------------------------- gear-end drive (exported from cad/assembly.scad)
+// ---------------------------------------------------------------- gear-end drive (exported from cad/designs/lathe_assembly.sc)
 const PARTS = {
   plate:       ['#d9a521', 'base plate (aluminium)', 0.6],
   bracket:     ['#3d7fd0', 'encoder bracket (printed)', 0.0],
-  pulley40:    ['#f08c1a', 'HTD-3M belt, motor 20T : leadscrew 40T', 0.4],
+  pulley40:    ['#f08c1a', `HTD-3M belt, motor ${N.ls_teeth[0]}T : leadscrew ${N.ls_teeth[1]}T`, 0.4],
   pulley20htd: ['#f08c1a', null, 0.4],
-  pulley60:    ['#79c96b', 'GT2 belt, stud 60T : encoder 20T', 0.1],
+  pulley60:    ['#79c96b', `GT2 belt, stud ${N.enc_teeth[0]}T : encoder ${N.enc_teeth[1]}T`, 0.1],
   pulley20gt2: ['#79c96b', null, 0.1],
   belts:       ['#26282c', null, 0.0],
   motor:       ['#aeb4bd', 'closed-loop motor 57CME13', 0.7],
@@ -215,19 +215,15 @@ for (const [name, m] of Object.entries(DATA.meshes)) {
     mesh.position.set(-SPIN[name][0], -SPIN[name][1], 0); g.add(mesh); root.drive.add(g); pivots[name] = g;
   } else root.drive.add(mesh);
 }
-// motor body scaled to the chosen motor's length (the CAD still holds the placeholder motor_len until the motor is measured)
-{
-  const g = meshes.motor.geometry, p = g.attributes.position.array, f = N.motor_face_z, s = MOTOR_LEN / N.motor_len;
-  for (let i = 2; i < p.length; i += 3) if (p[i] > f + 0.01) p[i] = f + (p[i] - f) * s;
-  g.attributes.position.needsUpdate = true; g.computeVertexNormals();
-}
+// the motor body is the CAD's (motor_len in cad/params.json): set the measured length there and rebuild
 const MOTOR_BACK = N.motor_face_z + MOTOR_LEN;
 // the motor's cable outlet block (57CME13: two pigtails from a block near the back), turned towards the hinge (-X): see door_cable_gap
 box(N.motor_box[0] - 12, N.motor_box[0], N.motor_xy[1] - 12, N.motor_xy[1] + 12, MOTOR_BACK - 26, MOTOR_BACK - 6, M.black, root.drive);
 
 // ---------------------------------------------------------------- the lathe (drawn from the photos: approximate)
-const BLUE_OUTLINE = [[-310.4, -92.6], [53.2, -92.6], [53.2, 125.3], [-27, 264.3], [-235.6, 264.3], [-310.4, 181.4]];
-const HINGE_X = N.hinge[0];
+const PANEL_TOP = 264.3;      // traced from the photo; the hinge edge, bottom and right edge are the CAD's (cad/params.json)
+const BLUE_OUTLINE = [[N.hinge[0], N.panel_bottom_y], [N.panel_right_x, N.panel_bottom_y], [N.panel_right_x, 125.3], [-27, PANEL_TOP], [-235.6, PANEL_TOP], [N.hinge[0], 181.4]];
+const HINGE_X = N.hinge[0], HINGE_Z = N.hinge[1];
 // cable holes in the end panel: 12 mm grommets A1 (motor power), A2 (motor encoder), B (spindle encoder); sw = the lathe's own switch lead
 const GROMMETS = { a1: [-40, -82], a2: [-40, -67], b: [30, 64], sw: [-104, -80] };
 // end panel (sheet metal) with the cable grommets
@@ -352,8 +348,9 @@ const lathePulleys = [];
   const belt = new THREE.Mesh(new THREE.ExtrudeGeometry(ring, { depth: 9, bevelEnabled: false }), M.rubber); belt.position.z = 20; root.lathe.add(belt);
 }
 
-// ---------------------------------------------------------------- gear door with the motor and encoder windows (cad/lib/layout.scad rule)
-const doorPivot = new THREE.Group(); doorPivot.position.x = HINGE_X; scene.add(doorPivot);
+// ---------------------------------------------------------------- gear door with the motor and encoder windows (the rule of cad/params.json: mwin_* / ewin_*)
+const doorPivot = new THREE.Group(); doorPivot.position.set(HINGE_X, 0, HINGE_Z); scene.add(doorPivot);   // turns about the CAD hinge axis
+const doorBody = new THREE.Group(); doorBody.position.z = -HINGE_Z; doorPivot.add(doorBody);              // door parts in the lathe frame (x from the hinge)
 const doorMat = mat('#24578f', 0.1, 0.5, { side: THREE.DoubleSide, transparent: true, opacity: 0.12, depthWrite: false });
 const edgeMat = new THREE.LineBasicMaterial({ color: '#9cc3ff', transparent: true, opacity: 0.85 });
 function swingEdgeX(xFar, zFront) {
@@ -371,8 +368,8 @@ const rectPath = (x0, x1, y0, y1, P = THREE.Path) => new P([new THREE.Vector2(x0
   const local = BLUE_OUTLINE.map(([x, y]) => [x - HINGE_X, y]);
   const face = new THREE.Shape(local.map(([x, y]) => new THREE.Vector2(x, y)));
   for (const w of windows) face.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
-  const add = (mesh) => { doorPivot.add(mesh); const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeMat);
-                          e.position.copy(mesh.position); e.rotation.copy(mesh.rotation); doorPivot.add(e); };
+  const add = (mesh) => { doorBody.add(mesh); const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeMat);
+                          e.position.copy(mesh.position); e.rotation.copy(mesh.rotation); doorBody.add(e); };
   const front = new THREE.Mesh(new THREE.ExtrudeGeometry(face, { depth: N.door_t, bevelEnabled: false }), doorMat);
   front.position.z = N.door_depth; add(front);
   for (let i = 0; i < local.length; i++) {
@@ -385,32 +382,32 @@ const rectPath = (x0, x1, y0, y1, P = THREE.Path) => new P([new THREE.Vector2(x0
     const outer = rectPath(w[0] - bw - HINGE_X, Math.min(w[1] + bw, xMax) - HINGE_X, Math.max(w[2] - bw, yMin), w[3] + bw, THREE.Shape);
     outer.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
     const bezel = new THREE.Mesh(new THREE.ExtrudeGeometry(outer, { depth: bt, bevelEnabled: false }), mat('#353b46', 0.1, 0.6));
-    bezel.position.z = N.door_depth + N.door_t; doorPivot.add(bezel);
+    bezel.position.z = N.door_depth + N.door_t; doorBody.add(bezel);
   }
 }
 
-// ---------------------------------------------------------------- control box: the printed parts exported from cad/control_box.scad
+// ---------------------------------------------------------------- control box: the printed parts exported from cad/designs/control_box_assembly.sc
 // cbox frame: x = panel right, y = up, z = out of the panel (front face at z = PT, rear rim at z = -CD). Mounted on an arm off the
 // headstock top through the M6 holes in its two ears, facing the operator (+X).
-const [CW, CH, CD] = N.cb, PT = 4;
+const [CW, CH, CD] = N.cb, PT = N.cb_panel_t;   // panel thickness: cad/params.json cb_panel_t
 const cbox = new THREE.Group(); cbox.position.set(125, 372, -170); cbox.rotation.y = Math.PI / 2; scene.add(cbox);
 {
-  const cad = new THREE.Group(); cad.rotation.y = Math.PI; cbox.add(cad);       // scad: viewer at -Z, x mirrored
+  const cad = new THREE.Group(); cad.rotation.y = Math.PI; cbox.add(cad);       // CAD frame: viewer at -Z, x mirrored
   const cbMats = { cb_panel: mat('#2c3038', 0.1, 0.55), cb_frame: mat('#353a43', 0.1, 0.6), cb_lid: mat('#2a2d33', 0.1, 0.6) };
   for (const k of Object.keys(cbMats)) cad.add(new THREE.Mesh(decode(DATA.meshes[k]), cbMats[k]));
 }
 const gridPt = (r, c) => [N.btn_grid[0] + (c - 1) * N.btn_pitch[0], N.btn_grid[1] + (1 - r) * N.btn_pitch[1]];
 const KEYS = [[['MODE', 1], ['UNITS', 2], ['DIR', 3]], [['JOG <', 6], ['RETURN', 8], ['JOG >', 7]], [['STOP L', 4], ['', -1], ['STOP R', 5]]];
-// engraved labels (paint-filled), at the positions control_box.scad engraves them (text top edge at the given y)
+// engraved labels (paint-filled), at the positions the control panel design engraves them (text top edge at the given y)
 {
   const S = 8, c = document.createElement('canvas'); c.width = CW * S; c.height = CH * S; const g = c.getContext('2d');
   const P = (x, y) => [(x + CW / 2) * S, (CH / 2 - y) * S];
   g.fillStyle = '#f2c230'; g.beginPath(); g.arc(...P(...N.estop), 25.5 * S, 0, Math.PI * 2); g.fill();      // E-stop legend plate
   g.textAlign = 'center'; g.textBaseline = 'top';
-  const text = (t, x, yTop, size = 3.4, col = '#e3e6ec') => { g.fillStyle = col; g.font = `bold ${size * S}px "Liberation Sans", Arial, sans-serif`; g.fillText(t, ...P(x, yTop)); };
+  const text = (t, x, yTop, size = N.label_size, col = '#e3e6ec') => { g.fillStyle = col; g.font = `bold ${size * S}px "Liberation Sans", Arial, sans-serif`; g.fillText(t, ...P(x, yTop)); };
   for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) { const [x, y] = gridPt(r, k); if (KEYS[r][k][0]) text(KEYS[r][k][0], x, y - N.btn_d / 2 - 1.5); }
-  text('NUT', N.nut[0], N.nut[1] - 16, 4.2); text('PITCH / JOG', N.knob[0], N.knob[1] - 14); text('FAULT', N.led[0], N.led[1] - 5.6);
-  text('E-STOP', N.estop[0], N.estop[1] - 20, 3.4, '#1b1b1b');
+  text('NUT', N.nut[0], N.nut[1] - 16, N.label_size + 0.8); text('PITCH / JOG', N.knob[0], N.knob[1] - 14); text('FAULT', N.led[0], N.led[1] - N.led_hole / 2 - 1.5);
+  text('E-STOP', N.estop[0], N.estop[1] - 20, N.label_size, '#1b1b1b');
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
   const decal = new THREE.Mesh(new THREE.PlaneGeometry(CW, CH), new THREE.MeshBasicMaterial({ map: t, transparent: true, toneMapped: false, depthWrite: false }));
   decal.position.z = PT + 0.08; cbox.add(decal);
@@ -428,7 +425,9 @@ const tft = tftCanvas.getContext('2d'); tft.fillStyle = '#000'; tft.fillRect(0, 
 const tftTex = new THREE.CanvasTexture(tftCanvas); tftTex.colorSpace = THREE.SRGBColorSpace; tftTex.minFilter = THREE.LinearFilter;
 {
   const scr = new THREE.Mesh(new THREE.PlaneGeometry(N.tft_win[0], N.tft_win[1]), new THREE.MeshBasicMaterial({ map: tftTex, toneMapped: false }));
-  scr.position.set(N.tft_pos[0], N.tft_pos[1], 0.5); cbox.add(scr);
+  // the visible area sits where the panel's window is: PCB lower-left + the measured offset (cad/params.json tft_win_off_*)
+  const wx = N.tft_pos[0] - N.tft_pcb[0] / 2 + N.tft_win_off[0] + N.tft_win[0] / 2, wy = N.tft_pos[1] - N.tft_pcb[1] / 2 + N.tft_win_off[1] + N.tft_win[1] / 2;
+  scr.position.set(wx, wy, 0.5); cbox.add(scr);
 }
 // purchased controls: 16 mm metal keys, 22 mm NUT key with LED ring, 22 mm twist-release E-stop, EC11 knob, 8 mm FAULT LED
 const clickables = [], keyMeshes = {};
@@ -704,7 +703,7 @@ tag('Control box<small>Teensy 4.1 · 2.8" screen · keys · knob · NUT · E-sto
 tag('Electrical box<small>48 V supply · driver · relay K1 · 5 V</small>', eW(0, EH / 2, ED / 2), ['overview']);
 tag('Closed-loop motor<small>through the door window</small>', motorTop, ['overview', 'gear']);
 tag('Spindle encoder', [N.enc[0], N.enc_box[3], N.enc_front_z], ['overview', 'gear']);
-tag('Gear door<small>its switch stops the spindle when opened</small>', [doorPivot, [-200 - HINGE_X, 264, N.door_depth]], ['overview', 'gear']);
+tag('Gear door<small>its switch stops the spindle when opened</small>', [doorPivot, [-200 - HINGE_X, 264, N.door_depth - HINGE_Z]], ['overview', 'gear']);
 tag('Carriage', [10, BED_Y + 40, Z_TOOL0], ['overview', 'operator']);
 tag('Leadscrew 3 mm', [8, 8, -820], ['overview', 'operator']);
 tag('Base plate on the old banjo seat', [20, 10, 12], ['gear']);
@@ -786,7 +785,7 @@ window.__cableCheck = () => {
     const [xi, yi] = BLUE_OUTLINE[i], [xj, yj] = BLUE_OUTLINE[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
   const wins = []; { const lim = N.door_depth - N.door_clear;
     if (MOTOR_BACK > lim) wins.push(windowFor(N.motor_box, MOTOR_BACK)); if (N.enc_front_z > lim) wins.push(windowFor(N.enc_box, N.enc_front_z)); }
-  const zf = N.door_depth + N.door_t, rDoorMax = Math.hypot(BLUE_OUTLINE[1][0] - HINGE_X, zf);
+  const zf = N.door_depth + N.door_t, rDoorMax = Math.hypot(BLUE_OUTLINE[1][0] - HINGE_X, zf - HINGE_Z);
   const out = [], samples = CABLES.map((c) => c.curve.getSpacedPoints(c.inside ? 240 : 400));
   const BOXSOL = Object.fromEntries(Object.entries(EPARTS).map(([k, [x0, x1, y0, y1, d]]) => [k, [x0, x1, y0, y1, 4, 4 + d]]));
   BOXSOL['PSU terminal block'] = [30, 65, -80, -75, 4, 40]; BOXSOL['flyback diode'] = [8, 28, 4.4, 7.6, 54.4, 57.6]; BOXSOL['inlet terminals'] = [176, EW / 2 - 2, -166, -134, 40, 60];
@@ -830,9 +829,9 @@ window.__cableCheck = () => {
       if (!c.inside && inOutline(p.x, p.y) && p.z > zf - 1.2 - c.r && p.z < zf + c.r) {   // crossing the closed door
         if (!wins.some((w) => p.x - c.r >= w[0] && p.x + c.r <= w[1] && p.y - c.r >= w[2] && p.y + c.r <= w[3])) bad['closed door'] = 0;
       }
-      if (!c.inside && p.z > zf && p.y > BLUE_OUTLINE[0][1] - c.r && p.y < 264.3 + c.r) {  // in the door's swing outside the door
-        const r = Math.hypot(p.x - HINGE_X, p.z), inWin = wins.some((w) => p.y - c.r >= w[2] && p.y + c.r <= w[3] &&
-          r - c.r >= Math.hypot(w[0] - HINGE_X, zf) && r + c.r <= Math.hypot(w[1] - HINGE_X, zf));
+      if (!c.inside && p.z > zf && p.y > BLUE_OUTLINE[0][1] - c.r && p.y < PANEL_TOP + c.r) {  // in the door's swing outside the door
+        const r = Math.hypot(p.x - HINGE_X, p.z - HINGE_Z), inWin = wins.some((w) => p.y - c.r >= w[2] && p.y + c.r <= w[3] &&
+          r - c.r >= Math.hypot(w[0] - HINGE_X, zf - HINGE_Z) && r + c.r <= Math.hypot(w[1] - HINGE_X, zf - HINGE_Z));
         if (r - c.r < rDoorMax + 1 && !inWin) bad['door swing'] = 0;
       }
     });
@@ -981,7 +980,7 @@ document.querySelectorAll('[data-view]').forEach((el) => (el.onclick = () => set
 
 const legend = $('legend');
 legend.innerHTML = Object.values(PARTS).filter((p) => p[1]).map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
-  `<span><i style="background:#2c3038"></i>control box (printed, cad/control_box.scad)</span><span><i style="background:#b9bec5"></i>electrical box</span>` +
+  `<span><i style="background:#2c3038"></i>control box (printed, cad/designs/control_box_assembly.sc)</span><span><i style="background:#b9bec5"></i>electrical box</span>` +
   `<span><i style="background:#5b6068"></i>motor power</span><span><i style="background:#1b1c1f"></i>motor / spindle encoder</span>` +
   `<span><i style="background:#2b4f86"></i>signals</span><span><i style="background:#8c2b2b"></i>5 V + E-stop / K1</span>` +
   `<span><i style="background:#3f9b3f"></i>PE</span><span><i style="background:#2f6fb5"></i>lathe (approximate)</span>`;
@@ -1010,9 +1009,9 @@ renderer.setAnimationLoop((now) => {
   carriage.position.z = Z_TOOL0 - st.pos;
   leadscrew.rotation.z = lsTurns * 2 * Math.PI;
   pivots.pulley40.rotation.z = lsTurns * 2 * Math.PI;
-  pivots.pulley20htd.rotation.z = lsTurns * 4 * Math.PI;
-  pivots.pulley60.rotation.z = -spRevs * 2 / 9 * 2 * Math.PI;
-  pivots.pulley20gt2.rotation.z = -spRevs * 2 / 3 * 2 * Math.PI;
+  pivots.pulley20htd.rotation.z = lsTurns * N.ls_teeth[1] / N.ls_teeth[0] * 2 * Math.PI;   // ratios from cad/params.json
+  pivots.pulley60.rotation.z = -spRevs * N.stud_ratio * 2 * Math.PI;
+  pivots.pulley20gt2.rotation.z = -spRevs * N.enc_per_spindle * 2 * Math.PI;
   chuck.rotation.z = -spRevs * 2 * Math.PI;
   lathePulleys[0][0].rotation.z = -spRevs * 2 * 2 * Math.PI;            // headstock input pulley (gear ratio not known: shown at 2x)
   lathePulleys[1][0].rotation.z = -spRevs * 2 * 51 / 32 * 2 * Math.PI;  // motor pulley, by the pulley diameters
@@ -1023,7 +1022,7 @@ renderer.setAnimationLoop((now) => {
   nutRingM.emissive.set(engaged ? '#2fd068' : armed && on ? '#d08a10' : '#000000');
   ledM.emissive.set(st.fault ? '#ff3b30' : '#000000'); ledM.color.set(st.fault ? '#ff4d40' : '#4a1410');
   w.sim_render(simMs, 0); tftTex.needsUpdate = true;
-  doorAngle += ((doorOpen ? -1.75 : 0) - doorAngle) * 0.12; doorPivot.rotation.y = doorAngle;
+  doorAngle += ((doorOpen ? -100 * Math.PI / 180 : 0) - doorAngle) * 0.12; doorPivot.rotation.y = doorAngle;
   eDoorAngle += ((curView === 'ebox' ? -1.9 : 0) - eDoorAngle) * 0.1; eDoor.rotation.y = eDoorAngle;
   const s = $('status');
   const showNote = now < noticeUntil;

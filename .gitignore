@@ -1,2 +1,5 @@
-cad/logs/
+cad/build/
+*.sc.bak
+.~*.sc.lock
+__pycache__/
 .DS_Store

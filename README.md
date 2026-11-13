@@ -24,7 +24,7 @@ All code and designs here are original.
 | [`docs/WIRING.md`](docs/WIRING.md), [`docs/wiring.svg`](docs/wiring.svg) | Every connection, interface board, E-stop, grounding |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | Fitting it to a 9x20, commissioning, calibration, first thread |
 | [`firmware/`](firmware) | PlatformIO project for the Teensy 4.1 + unit tests of the motion core |
-| [`cad/`](cad) | Parametric OpenSCAD parts: motor mount, pulleys, encoder bracket, control box |
+| [`cad/`](cad) | Parametric SolidCraft designs (built from `cad/params.json` by `cad/build.py`): base plate, pulleys, encoder bracket, door bezels, control box, and the lathe assembly with its fit checks |
 | [`sim/`](sim) | Browser simulator running the **real firmware core** compiled to WebAssembly |
 
 ## Try it first: the simulator

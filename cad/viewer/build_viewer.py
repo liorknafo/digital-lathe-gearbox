@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Builds self-contained interactive 3D viewers (HTML + three.js) of cad/assembly.scad.
+"""Builds self-contained interactive 3D viewers (HTML + three.js) of the SolidCraft assemblies.
 
-Every named piece of the assembly (see `piece()` in assembly.scad) is exported as an STL,
-quantised to a 0.05 mm grid with shared vertices, and embedded as base64 in the page.
+Every piece (a group of bodies of cad/designs/lathe_assembly.sc and control_box_assembly.sc) is exported as an STL by
+SolidCraft, quantised to a 0.05 mm grid with shared vertices, and embedded as base64 in the page. The layout numbers come
+from cad/params.json (evaluated by SolidCraft). Run by cad/build.py after the assemblies; or on its own:
 
     python3 cad/viewer/build_viewer.py            # writes cad/viewer/assembly_3d.html (gear end only)
                                                   #    and cad/viewer/machine_3d.html (whole lathe, control box, electrical box,
@@ -10,57 +11,100 @@ quantised to a 0.05 mm grid with shared vertices, and embedded as base64 in the 
     python3 cad/viewer/build_viewer.py --png DIR  # also writes DIR/{assembly,machine}_preview.html + _mesh.png: variants that read the
         # bytes from a PNG (in the RGB pixels), for HTML previewers that inline local images but limit the page size
 
-Needs OpenSCAD on PATH (`openscad`), Python 3, no other packages.
+Needs SolidCraft (solidcraft-cli) and Python 3, no other packages.
 """
 import base64
 import gzip
 import json
 import os
-import re
 import struct
-import subprocess
 import sys
 import tempfile
 import zlib
-from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAD = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(CAD, "lib"))
+import sc  # noqa: E402
+
 OUT = os.path.join(HERE, "assembly_3d.html")
 OUT_FULL = os.path.join(HERE, "machine_3d.html")
 WASM = os.path.join(os.path.dirname(CAD), "sim", "web", "els.wasm")   # built by sim/build.sh
 GRID = 0.05  # mm per quantisation step (int16 range = +-1638 mm)
-# Coarser curves than the print exports: this is only for looking at (explicit $fn in the parts still wins).
-FACETS = ["-D", "$fa=12", "-D", "$fs=1.2", "-D", "$coarse=true"]
 # Display-only simplification: vertices closer than this (mm) are merged (vertex clustering).
 CLUSTER = {"default": 0.5, "pulley40": 0.4, "pulley60": 0.4, "pulley20gt2": 0.35, "pulley20htd": 0.35}
 
-# Pieces exported from assembly.scad; the viewer colours them by name.
-PIECES = ["plate", "bracket", "pulley40", "pulley20htd", "pulley60", "pulley20gt2", "belts", "motor",
-          "encoder", "standoffs", "stud_ring", "shafts", "hardware", "cap", "spindle", "switch", "plunger"]
-
-
-# The machine view also shows the printed control box, in its own frame (cad/control_box.scad: assembled, viewer at -Z).
-CB_PIECES = {"cb_panel": "panel_asm", "cb_frame": "frame_asm", "cb_lid": "lid_asm"}
+# Pieces of the lathe assembly (bodies of cad/designs/lathe_assembly.sc); the viewer colours them by name.
+_SO = ["M5 hex standoffs"] + [f"M5 hex standoffs ({i})" for i in (2, 3, 4)]
+PIECES = {
+    "plate": ["Base plate"], "bracket": ["Encoder bracket"], "pulley40": ["Pulley HTD-3M 40T"],
+    "pulley20htd": ["Motor pulley 20T (bought)"], "pulley60": ["Pulley GT2 60T"], "pulley20gt2": ["Pulley GT2 20T"],
+    "belts": ["HTD-3M belt 3M-207", "GT2 belt 200"], "motor": ["Motor body", "Motor pilot"], "encoder": ["Encoder body", "Encoder pilot"],
+    "standoffs": _SO + [f"Washer shim {i}" for i in (1, 2, 3, 4)], "stud_ring": ["Stud shoulder"],
+    "shafts": ["Leadscrew shaft", "Leadscrew shoulder", "Stud shaft", "Motor shaft", "Encoder shaft"],
+    "hardware": ["Leadscrew end washer", "Leadscrew end screw head", "Stud end washer", "Stud end screw head", "B1 screw", "B2 screw"]
+                + [f"M5 standoff fastener {i}" for i in (1, 2, 3, 4)] + ["M4 bracket screw 1", "M4 bracket screw 2"],
+    "cap": ["Spindle bearing cap"], "spindle": ["Spindle"], "switch": ["Door switch box"], "plunger": ["Door switch plunger"],
+}
+# The machine view also shows the printed control box, in its own frame (assembled, viewer at -Z).
+CB_PIECES = {"cb_panel": ["Control panel"], "cb_frame": ["Control frame"], "cb_lid": ["Control lid"]}
 # Standalone pages get their own dark page colours; the preview variants inherit the host's theme instead.
 STANDALONE_CSS = "  html { background: #14161b; } body { margin: 0; padding: 16px; color: #e6e6e6; }\n"
 
 
-def export(name, tmp, scad="assembly.scad", part=None):
-    path = os.path.join(tmp, name + ".stl")
-    subprocess.run(["openscad", "--backend=manifold", "--export-format", "binstl", "-D", f'part="{part or name}"', *FACETS,
-                    "-o", path, os.path.join(CAD, scad)],
-                   check=True, capture_output=True, text=True)
-    return name, path
+def export_all(design, pieces, tmp):
+    """One SolidCraft run on the saved assembly: an STL per piece. Returns [(name, path)]."""
+    names = {b for bodies in pieces.values() for b in bodies}
+    steps, out = [], []
+    for name, bodies in pieces.items():
+        path = os.path.join(tmp, name + ".stl")
+        steps.append({"command": "file.export", "params": {"bodies": bodies, "path": path}})
+        out.append((name, path))
+    script = os.path.join(tmp, os.path.basename(design) + ".export.json")
+    with open(script, "w") as f:
+        json.dump({"commands": steps}, f)
+    sc.run_cli(["run", script, "--in", design, "--quiet"])
+    missing = [p for _, p in out if not os.path.exists(p)]
+    if missing:
+        sys.exit(f"export missing {missing} ({sorted(names)})")
+    return out
 
 
-def read_numbers():
-    res = subprocess.run(["openscad", "-D", 'part="none"', "--export-format", "echo", "-o", "-",
-                          os.path.join(CAD, "assembly.scad")], capture_output=True, text=True, check=True)
-    m = re.search(r'VIEWER (\{.*\})"', res.stdout + res.stderr)
-    if not m:
-        sys.exit("assembly.scad did not echo the VIEWER line")
-    return json.loads(m.group(1).replace('\\"', '"'))
+def read_numbers(v=None):
+    if v is None:
+        v = sc.evaluate(sc.load_params())
+    r = lambda x: round(x, 4)
+    return {"motor_face_z": r(v["motor_face_z"]), "motor_len": v["motor_len"], "enc_front_z": r(v["enc_front_z"]),
+            "door_depth": v["door_depth"], "plunger": [v["plunger_x"], v["plunger_y"]],
+            "motor_box": [r(v["mbox_x0"]), r(v["mbox_x1"]), r(v["mbox_y0"]), r(v["mbox_y1"])],
+            "enc_box": [r(v["ebox_x0"]), r(v["ebox_x1"]), r(v["ebox_y0"]), r(v["ebox_y1"])],
+            "hinge": [v["door_hinge_x"], v["door_hinge_z"]], "door_t": v["door_t"], "cut_clear": v["door_cut_clear"],
+            "cable_gap": v["door_cable_gap"], "cut_clear_y": v["door_cut_clear_y"], "swing_margin": v["door_swing_margin"],
+            "door_clear": v["door_clear"], "bezel": [v["bezel_w"], v["bezel_t"], v["bezel_r"]],
+            "stud": [v["stud_x"], v["stud_y"]], "enc": [r(v["enc_x"]), r(v["enc_y"])], "motor_xy": [r(v["motor_x"]), r(v["motor_y"])],
+            "spindle": [v["spindle_x"], v["spindle_y"]], "cb": [v["cb_w"], v["cb_h"], v["cb_depth"]],
+            "tft_pos": [v["tft_x"], v["tft_y"]], "tft_win": [v["tft_win_w"], v["tft_win_h"]],
+            "btn_grid": [v["btn_grid_x"], v["btn_grid_y"]], "btn_pitch": [v["btn_pitch_x"], v["btn_pitch_y"]], "btn_d": v["btn_hole"],
+            "nut": [v["nutbtn_x"], v["nutbtn_y"]], "estop": [v["estop_x"], v["estop_y"]], "estop_d": v["estop_head_d"],
+            "knob": [v["knob_x"], v["knob_y"]], "led": [v["led_x"], v["led_y"]],
+            "gland_x": [-v["gland_pitch"], 0, v["gland_pitch"]], "cb_wall": v["cb_wall"], "cb_post": v["cb_post"],
+            "ear": [v["ear_len"], v["ear_w"]],
+            # the drive, for the labels and the animation
+            "ls_teeth": [round(v["ls_teeth_motor"]), round(v["ls_teeth_screw"])],
+            "enc_teeth": [round(v["enc_teeth_stud"]), round(v["enc_teeth_encoder"])],
+            "stud_ratio": v["stud_ratio"], "enc_per_spindle": v["enc_per_spindle"],
+            "gland_z": v["gland_z"], "pitch": _firmware_pitch(),
+            "panel_bottom_y": v["panel_bottom_y"], "panel_right_x": v["panel_right_x"], "cb_panel_t": v["cb_panel_t"],
+            "label_size": v["label_size"], "led_hole": v["led_hole"],
+            "tft_pcb": [v["tft_pcb_w"], v["tft_pcb_h"]], "tft_win_off": [v["tft_win_off_x"], v["tft_win_off_y"]]}
+
+
+def _firmware_pitch():
+    """Leadscrew pitch (mm) the firmware drives the carriage with: firmware/include/lathe_config.h (TPI or PITCH_UM)."""
+    import re
+    path = os.path.join(os.path.dirname(CAD), "firmware", "include", "lathe_config.h")
+    d = {m.group(1): int(m.group(2)) for m in re.finditer(r"^\s*#define\s+(\w+)\s+(\d+)\s*$", open(path).read(), re.M)}
+    return 25.4 / d["LEADSCREW_TPI"] if d.get("LEADSCREW_TPI") else d["LEADSCREW_PITCH_UM"] / 1000
 
 
 def load_stl(path, cell):
@@ -154,14 +198,23 @@ def write_pages(template_name, out, blob, nums, meshes, extra, png_dir, stem):
         print(f"wrote {html_path} ({len(variant) / 1024:.0f} kB) + {png_path} ({os.path.getsize(png_path) / 1024:.0f} kB)")
 
 
-def main():
+def main(argv=None, v=None):
+    argv = sys.argv[1:] if argv is None else argv
     png_dir = None
-    if len(sys.argv) == 3 and sys.argv[1] == "--png":
-        png_dir = os.path.abspath(sys.argv[2])
+    if len(argv) == 2 and argv[0] == "--png":
+        png_dir = os.path.abspath(argv[1])
         os.makedirs(png_dir, exist_ok=True)
-    nums = read_numbers()
-    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(8) as pool:
-        files = list(pool.map(lambda p: export(p, tmp), PIECES))
+    if v is None:
+        v = sc.evaluate(sc.load_params())
+    nums = read_numbers(v)
+    pieces = dict(PIECES)
+    if v["stud_spacer"] > 0:                       # the optional ring sits on the stud shoulder: show it with it
+        pieces["stud_ring"] = PIECES["stud_ring"] + ["Stud spacer"]
+    if v["base_m5"] == "insert":                   # heat-set inserts in the plate (option base_m5)
+        pieces["hardware"] = PIECES["hardware"] + [f"M5 insert {i}" for i in (1, 2, 3, 4)]
+    designs = os.path.join(CAD, "designs")
+    with tempfile.TemporaryDirectory() as tmp:
+        files = export_all(os.path.join(designs, "lathe_assembly.sc"), pieces, tmp)
         meshes, blob = {}, bytearray()
         tri_total = 0
         for name, path in files:
@@ -169,15 +222,18 @@ def main():
             tri_total += len(index) // 3
             meshes[name] = pack(pos, index, nv, blob)
             print(f"  {name:12s} {len(index) // 3:6d} tris {nv:6d} verts")
-        cb_files = list(pool.map(lambda kv: export(kv[0], tmp, "control_box.scad", kv[1]), CB_PIECES.items()))
+        cb_files = export_all(os.path.join(designs, "control_box_assembly.sc"), CB_PIECES, tmp)
         cb_meshes, cb_blob = {}, bytearray(blob)
         for name, path in cb_files:
             pos, index, nv = load_stl(path, 0.25)
             cb_meshes[name] = pack(pos, index, nv, cb_blob)
             print(f"  {name:12s} {len(index) // 3:6d} tris {nv:6d} verts")
-    print(f"{tri_total} triangles, numbers {nums}")
+    print(f"{tri_total} triangles")
     write_pages("template.html", OUT, blob, nums, meshes, {}, png_dir, "assembly")
     # The machine view also carries the firmware core (WebAssembly) behind the control box screen and buttons.
+    if not os.path.exists(WASM):
+        print(f"no {WASM} (run sim/build.sh): machine_3d.html not written")
+        return
     with open(WASM, "rb") as f:
         wasm = f.read()
     full = cb_blob

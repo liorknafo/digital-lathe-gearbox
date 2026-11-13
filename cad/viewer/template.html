@@ -63,9 +63,9 @@ const N = DATA.nums;
 const PARTS = {
   plate:       ['#d9a521', 'base plate (aluminium)', 0.3],
   bracket:     ['#3d7fd0', 'encoder bracket (printed)', 0.0],
-  pulley40:    ['#f08c1a', 'HTD-3M 40T / 20T pulleys', 0.3],
+  pulley40:    ['#f08c1a', `HTD-3M ${N.ls_teeth[1]}T / ${N.ls_teeth[0]}T pulleys`, 0.3],
   pulley20htd: ['#f08c1a', null, 0.3],
-  pulley60:    ['#79c96b', 'GT2 60T / 20T pulleys', 0.1],
+  pulley60:    ['#79c96b', `GT2 ${N.enc_teeth[0]}T / ${N.enc_teeth[1]}T pulleys`, 0.1],
   pulley20gt2: ['#79c96b', null, 0.1],
   belts:       ['#26282c', 'belts', 0.0],
   motor:       ['#aeb4bd', 'closed-loop NEMA23', 0.6],
@@ -81,9 +81,11 @@ const PARTS = {
 };
 const PANEL = '#2f6fb5';
 
-// Gear end panel outline (mm, origin = leadscrew axis), traced from the photo: approximate.
-const OUTLINE = [[-310.4, -92.6], [53.2, -92.6], [53.2, 125.3], [-27, 264.3], [-235.6, 264.3], [-310.4, 181.4]];
-const HINGE_X = -310.4;
+// Gear end panel outline (mm, origin = leadscrew axis): hinge edge, bottom and right edge from cad/params.json, the top traced from
+// the photo (approximate). The door hinges about a vertical axis at (door_hinge_x, door_hinge_z).
+const PANEL_TOP = 264.3;
+const OUTLINE = [[N.hinge[0], N.panel_bottom_y], [N.panel_right_x, N.panel_bottom_y], [N.panel_right_x, 125.3], [-27, PANEL_TOP], [-235.6, PANEL_TOP], [N.hinge[0], 181.4]];
+const HINGE_X = N.hinge[0], HINGE_Z = N.hinge[1];
 
 // ---------------------------------------------------------------- scene
 const stage = document.getElementById('stage');
@@ -166,13 +168,14 @@ const drive = new THREE.Group(); scene.add(drive);
 }
 
 // Door: a sheet-metal box over the panel outline, hinged on the left edge.
-const doorPivot = new THREE.Group(); doorPivot.position.x = HINGE_X; scene.add(doorPivot);
+const doorPivot = new THREE.Group(); doorPivot.position.set(HINGE_X, 0, HINGE_Z); scene.add(doorPivot);   // turns about the CAD hinge axis
+const doorBody = new THREE.Group(); doorBody.position.z = -HINGE_Z; doorPivot.add(doorBody);              // door parts in the lathe frame (x from the hinge)
 const doorMat = mat(PANEL, 0.1, { side: THREE.DoubleSide, transparent: true, opacity: 0.22, depthWrite: false });
 const edgeMat = new THREE.LineBasicMaterial({ color: '#9cc3ff', transparent: true, opacity: 0.8 });
-const addDoorPart = (mesh) => { doorPivot.add(mesh); const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeMat);
-                                e.position.copy(mesh.position); e.rotation.copy(mesh.rotation); doorPivot.add(e); };
+const addDoorPart = (mesh) => { doorBody.add(mesh); const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeMat);
+                                e.position.copy(mesh.position); e.rotation.copy(mesh.rotation); doorBody.add(e); };
 let doorDepth = N.door_depth;
-// Door windows, same rule as cad/lib/layout.scad: hinge-side / top / bottom get a plain gap; the far edge must be at least as far
+// Door windows, same rule as cad/params.json (mwin_* / ewin_*): hinge-side / top / bottom get a plain gap; the far edge must be at least as far
 // from the hinge axis as the outer back corner of what pokes through, or the door sweeps into it while opening.
 function swingEdgeX(xFar, zFront) {
   const [hx, hz] = N.hinge, rc = Math.hypot(xFar - hx, zFront - hz), dz = doorDepth - hz;
@@ -185,7 +188,7 @@ const rectPath = (x0, x1, y0, y1, P = THREE.Path) => new P([new THREE.Vector2(x0
 const bezelMat = mat('#3b4250', 0.1);
 let windows = [];
 function buildDoor() {
-  doorPivot.clear();
+  doorBody.clear();
   const local = OUTLINE.map(([x, y]) => [x - HINGE_X, y]);
   const face = new THREE.Shape(local.map(([x, y]) => new THREE.Vector2(x, y)));
   for (const w of windows) face.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
@@ -205,7 +208,7 @@ function buildDoor() {
     const outer = rectPath(w[0] - bw - HINGE_X, Math.min(w[1] + bw, xMax) - HINGE_X, Math.max(w[2] - bw, yMin), w[3] + bw, THREE.Shape);
     outer.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
     const bezel = new THREE.Mesh(new THREE.ExtrudeGeometry(outer, { depth: bt, bevelEnabled: false }), bezelMat);
-    bezel.position.z = doorDepth + N.door_t; doorPivot.add(bezel);
+    bezel.position.z = doorDepth + N.door_t; doorBody.add(bezel);
   }
 }
 
@@ -279,7 +282,7 @@ new ResizeObserver(resize).observe(stage);
 resize(); update(); setView('iso');
 
 renderer.setAnimationLoop(() => {
-  const goal = doorOpen ? -1.75 : 0;
+  const goal = doorOpen ? -100 * Math.PI / 180 : 0;   // the CAD door hinge opens 0..100 deg
   doorAngle += (goal - doorAngle) * 0.12; doorPivot.rotation.y = doorAngle;
   controls.update(); renderer.render(scene, camera);
 });
