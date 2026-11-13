@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Digital lathe gearbox — simulator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Digital lathe gearbox <span>simulator · runs the real firmware core (WebAssembly)</span></h1>
+</header>
+
+<main>
+  <section class="panel control-box">
+    <canvas id="tft" width="320" height="240"></canvas>
+    <div class="keys">
+      <button data-btn="1" title="M · hold = new thread">MODE</button>
+      <button data-btn="2" title="U">UNITS</button>
+      <button data-btn="3" title="D">DIR</button>
+      <button data-btn="6" title="←">◀ JOG</button>
+      <button data-btn="8" title="R">RETURN</button>
+      <button data-btn="7" title="→">JOG ▶</button>
+      <button data-btn="4" title="[ · hold = clear">STOP L</button>
+      <button class="spare" disabled></button>
+      <button data-btn="5" title="] · hold = clear">STOP R</button>
+    </div>
+    <div class="leds"><span id="faultLed" class="led"></span>FAULT</div>
+    <div class="big-row">
+      <button id="nut" data-btn="0" title="N">NUT</button>
+      <div id="knob" title="wheel / - = to turn, K or click centre to push"><div class="mark"></div></div>
+      <button id="estop" title="X">E-STOP</button>
+    </div>
+    <p class="hint">Keys: <b>N</b> nut · <b>←/→</b> jog · <b>[ ]</b> stops (hold = clear) · <b>R</b> return ·
+      <b>M</b> mode (hold = new thread) · <b>U</b> units · <b>D</b> dir · <b>-/=</b> knob · <b>K</b> knob push ·
+      <b>Space</b> spindle on/off · <b>X</b> e-stop</p>
+  </section>
+
+  <section class="panel lathe">
+    <canvas id="lathe" width="960" height="250"></canvas>
+    <div class="spindle-controls">
+      <label>Spindle <output id="rpmOut">0</output> rpm</label>
+      <input id="rpm" type="range" min="-1200" max="1200" step="10" value="300">
+      <button id="spinFwd">Forward</button>
+      <button id="spinStop">Stop</button>
+      <button id="spinRev">Reverse</button>
+      <label class="slow"><input id="slowmo" type="checkbox"> slow motion ×0.2</label>
+      <label class="slow"><input id="alarm" type="checkbox"> driver alarm</label>
+    </div>
+    <h2>Thread phase <span>each pass is plotted as spindle angle vs. carriage position — passes in sync lie on the same lines</span></h2>
+    <canvas id="phase" width="960" height="230"></canvas>
+    <div id="passes"></div>
+  </section>
+</main>
+
+<script src="els_wasm.js"></script>
+<script src="sim.js"></script>
+</body>
+</html>

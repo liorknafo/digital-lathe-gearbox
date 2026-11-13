@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roher TBL-20/520 electronic leadscrew - whole machine 3D</title>
+<style>
+  .els { font-family: var(--font-sans, system-ui, sans-serif); color: var(--foreground, #e6e6e6); }
+  .els .stage { position: relative; height: 560px; padding: 16px; border-radius: var(--radius, 10px); overflow: hidden;
+                background: var(--card, #1c1e24); }
+  .els .stage canvas { display: block; width: 100%; height: 100%; border-radius: calc(var(--radius, 10px) - 4px); touch-action: none; }
+  .els .hint { position: absolute; left: 26px; bottom: 22px; font-size: 11px; opacity: .7; pointer-events: none; color: #e6e6e6; }
+  .els .tags { position: absolute; inset: 16px; pointer-events: none; overflow: hidden; }
+  .els .tag { position: absolute; left: 0; top: 0; max-width: 150px; font-size: 11.5px; line-height: 1.25; color: #f2f4f8;
+              background: rgba(16, 18, 24, .86); border: 1px solid rgba(150, 185, 240, .7); border-radius: 6px; padding: 3px 7px; }
+  .els svg.leaders { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+  .els svg.leaders line { stroke: #8fc0ff; stroke-width: 1.3; }
+  .els svg.leaders circle { fill: #8fc0ff; stroke: rgba(16, 18, 24, .9); stroke-width: 2; }
+  .els .tag small { display: block; opacity: .75; font-size: 11px; }
+  .els .tags.compact .tag { max-width: 105px; font-size: 11px; } .els .tags.compact .tag small { display: none; }
+  .els .bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 10px 0 6px; font-size: 13px; }
+  .els button { font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; border-radius: var(--radius, 8px);
+                border: 1px solid var(--border, #444); background: var(--secondary, #2a2d35); color: var(--secondary-foreground, #eee); }
+  .els button.on { background: var(--primary, #4f8cff); color: var(--primary-foreground, #fff); border-color: transparent; }
+  .els label { display: inline-flex; align-items: center; gap: 6px; }
+  .els input[type=range] { width: 130px; }
+  .els .val { font-family: var(--font-mono, ui-monospace, monospace); min-width: 64px; display: inline-block; }
+  .els .status { font-size: 13px; padding: 8px 12px; border-radius: var(--radius, 8px); margin-top: 4px; border: 1px solid var(--border, #444);
+                 font-family: var(--font-mono, ui-monospace, monospace); white-space: pre-line; }
+  .els .status.warn { border-color: var(--warning, #f5a524); background: var(--warning-surface, rgba(245, 165, 36, .12)); }
+  .els .note { font-size: 12px; opacity: .8; margin-top: 8px; line-height: 1.45; }
+  .els .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: 8px; opacity: .9; }
+  .els .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="els">
+  <div class="stage" id="stage"><div class="tags" id="tags"></div>
+    <div class="hint">drag = rotate · right-drag = pan · wheel = zoom · click the control-box keys, knob, NUT and E-stop</div></div>
+
+  <div class="bar">
+    <span>View</span>
+    <button data-view="overview" class="on">Whole machine</button>
+    <button data-view="operator">Operator</button>
+    <button data-view="gear">Gear end</button>
+    <button data-view="box">Control box</button>
+    <button data-view="ebox">Electrical box</button>
+    <span style="width:6px"></span>
+    <button id="doorBtn">Open gear door</button>
+    <label><input type="checkbox" id="xray" checked> see-through door</label>
+    <label><input type="checkbox" id="labels" checked> labels</label>
+  </div>
+  <div class="bar">
+    <span>Lathe spindle</span>
+    <button id="spinFwd">Forward</button>
+    <button id="spinStop">Stop</button>
+    <button id="spinRev">Reverse</button>
+    <label><input type="range" id="rpm" min="50" max="1200" step="10" value="300"> <span class="val" id="rpmVal"></span></label>
+    <label><input type="checkbox" id="slowmo"> slow motion ×0.2</label>
+  </div>
+  <div class="status" id="status">loading…</div>
+  <div class="note">Measured / from the CAD: the whole gear-end drive, the door and its windows, the control box (exported from
+    <code>cad/control_box.scad</code>). Drawn from the photos, approximate: the lathe itself, its stand, the electrical box layout and the
+    cable runs. The ELS and the screen run the real firmware core; the lathe's own door switch stops the spindle when the gear door opens.</div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const DATA = /*__DATA__*/null;
+const N = DATA.nums;
+// Frame (mm), same as the CAD: origin = leadscrew axis at the gear end, +X = towards the operator (front of the lathe), +Y = up,
+// +Z = out of the gear end. The lathe runs along -Z: headstock, chuck, bed, tailstock.
+const PITCH = 3;              // leadscrew pitch (mm), firmware/include/lathe_config.h
+const MOTOR_LEN = 75;         // chosen motor: Leadshine 57CME13 (~75 mm), docs/BOM.md
+const CENTRE_H = 110;         // lathe centre height above the bed (spec)
+const SP = N.spindle, BED_Y = SP[1] - CENTRE_H;
+const Z_HEAD = -285;          // headstock casting ends here (chuck side)
+const Z_BED_END = -1095;
+const Z_TOOL0 = -520;         // tool Z when the firmware's carriage position is 0 (the work is 190 mm out of the chuck)
+const GLAND_Z = 42;           // control box: PG7 glands, distance from the front rim (cad/params.scad gland_z)
+
+// ---------------------------------------------------------------- renderer
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.92;
+stage.insertBefore(renderer.domElement, stage.firstChild);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(32, 1, 2, 30000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3c4048, 0.7));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(900, 1500, 1000); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.5); fill.position.set(-900, 400, -700); scene.add(fill);
+
+const mat = (color, metal = 0.15, rough = 0.6, extra = {}) => new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: rough, ...extra });
+const M = {
+  blue: mat('#2f6fb5', 0.1, 0.5), blueDark: mat('#245a96', 0.1, 0.55), bed: mat('#454c57', 0.3, 0.6), steel: mat('#c3c8cf', 0.85, 0.3),
+  steelDark: mat('#7d848d', 0.8, 0.35), black: mat('#1e2024', 0.2, 0.55), rubber: mat('#141518', 0, 0.85), white: mat('#e4e6e9', 0.05, 0.7),
+  red: mat('#c62a1f', 0.1, 0.45), yellow: mat('#f2c230', 0.1, 0.5), brass: mat('#c9a24a', 0.8, 0.35), grey: mat('#8d949d', 0.4, 0.5),
+};
+const root = { lathe: new THREE.Group(), drive: new THREE.Group(), cables: new THREE.Group() };
+Object.values(root).forEach((g) => scene.add(g));
+function box(x0, x1, y0, y1, z0, z1, m, parent = root.lathe) {
+  const g = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0)), m);
+  g.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); parent.add(g); return g;
+}
+// cylinder along Z from z0 to z1 at (x, y)
+function cylZ(r, z0, z1, m, x = 0, y = 0, segs = 48, parent = null) {
+  const g = new THREE.CylinderGeometry(r, r, Math.abs(z1 - z0), segs); g.rotateX(Math.PI / 2);
+  const mesh = new THREE.Mesh(g, m); mesh.position.set(x, y, (z0 + z1) / 2); if (parent) parent.add(mesh); return mesh;
+}
+// cylinder along X from x0 to x1 at (y, z)
+function cylX(r, x0, x1, m, y = 0, z = 0, segs = 32, parent = root.lathe) {
+  const g = new THREE.CylinderGeometry(r, r, Math.abs(x1 - x0), segs); g.rotateZ(Math.PI / 2);
+  const mesh = new THREE.Mesh(g, m); mesh.position.set((x0 + x1) / 2, y, z); parent.add(mesh); return mesh;
+}
+function cylY(r, y0, y1, m, x = 0, z = 0, segs = 32, parent = root.lathe) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.abs(y1 - y0), segs), m);
+  mesh.position.set(x, (y0 + y1) / 2, z); parent.add(mesh); return mesh;
+}
+// a handwheel in its local XY plane, facing +Z: rim, hub, 3 spokes, crank handle
+function handwheel(r, withHandle = true) {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.TorusGeometry(r, Math.max(2.5, r * 0.09), 12, 48), M.steel));
+  g.add(cylZ(r * 0.22, -6, 6, M.steel));
+  for (let k = 0; k < 3; k++) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(r, r * 0.1, r * 0.08), M.steel);
+    s.position.set(Math.cos(k * 2.094) * r / 2, Math.sin(k * 2.094) * r / 2, 0); s.rotation.z = k * 2.094; g.add(s);
+  }
+  if (withHandle) { const h = cylZ(r * 0.09, 0, r * 0.75, M.black, r * 0.75, 0, 16); g.add(h);
+                    const k = new THREE.Mesh(new THREE.SphereGeometry(r * 0.13, 16, 10), M.black); k.position.set(r * 0.75, 0, r * 0.75); g.add(k); }
+  return g;
+}
+// flat text label (for parts): a plane with the text, facing +Z
+function textPlane(lines, w, h, { bg = null, fg = '#1b1d22', size = 0.36, bold = true } = {}) {
+  const S = 8, c = document.createElement('canvas'); c.width = w * S; c.height = h * S; const g = c.getContext('2d');
+  if (bg) { g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height); }
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const L = Array.isArray(lines) ? lines : [lines], fs = h * S * size;
+  L.forEach((t, i) => { g.font = `${bold && i === 0 ? 'bold ' : ''}${i === 0 ? fs : fs * 0.78}px system-ui, sans-serif`;
+                        g.fillText(t, c.width / 2, c.height / 2 + (i - (L.length - 1) / 2) * fs * 1.15); });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, transparent: !bg, toneMapped: false }));
+}
+
+// ---------------------------------------------------------------- bytes: meshes + firmware
+function bytes(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
+async function pngBytes(img) {
+  await img.decode();
+  const bmp = await createImageBitmap(img, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  const c = new OffscreenCanvas(bmp.width, bmp.height), ctx = c.getContext('2d');
+  ctx.drawImage(bmp, 0, 0);
+  const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data, rgb = new Uint8Array(bmp.width * bmp.height * 3);
+  for (let i = 0, j = 0; i < px.length; i += 4) { rgb[j++] = px[i]; rgb[j++] = px[i + 1]; rgb[j++] = px[i + 2]; }
+  const len = rgb[0] | (rgb[1] << 8) | (rgb[2] << 16) | (rgb[3] << 24);
+  return rgb.buffer.slice(4, 4 + len);
+}
+const BLOB = DATA.png ? await pngBytes(document.getElementById(DATA.png))
+  : await new Response(new Blob([bytes(DATA.blob)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+function undelta(offset, count) {
+  const d = new DataView(BLOB, offset, count * 2), out = new Int32Array(count);
+  let v = 0;
+  for (let i = 0; i < count; i++) { v += d.getInt16(i * 2, true); out[i] = v; }
+  return out;
+}
+function decode(m) {
+  const planar = undelta(m.pos[0], m.pos[1]), n = m.pos[1] / 3, p = new Float32Array(m.pos[1]);
+  for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) p[i * 3 + a] = planar[a * n + i] * DATA.grid;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  g.setIndex(new THREE.BufferAttribute(Uint32Array.from(undelta(m.idx[0], m.idx[1])), 1));
+  g.computeVertexNormals();
+  return g;
+}
+
+// ---------------------------------------------------------------- gear-end drive (exported from cad/assembly.scad)
+const PARTS = {
+  plate:       ['#d9a521', 'base plate (aluminium)', 0.6],
+  bracket:     ['#3d7fd0', 'encoder bracket (printed)', 0.0],
+  pulley40:    ['#f08c1a', 'HTD-3M belt, motor 20T : leadscrew 40T', 0.4],
+  pulley20htd: ['#f08c1a', null, 0.4],
+  pulley60:    ['#79c96b', 'GT2 belt, stud 60T : encoder 20T', 0.1],
+  pulley20gt2: ['#79c96b', null, 0.1],
+  belts:       ['#26282c', null, 0.0],
+  motor:       ['#aeb4bd', 'closed-loop motor 57CME13', 0.7],
+  encoder:     ['#d2d6dc', 'spindle encoder LPD3806', 0.7],
+  standoffs:   ['#6f7f90', null, 0.7],
+  stud_ring:   ['#c78545', null, 0.3],
+  shafts:      ['#d0d4da', null, 0.8],
+  hardware:    ['#4a4f57', null, 0.6],
+  cap:         ['#3a3d42', null, 0.3],
+  spindle:     ['#80858c', null, 0.6],
+  switch:      ['#202226', null, 0.1],
+  plunger:     ['#d23ad8', null, 0.1],
+};
+const SPIN = { pulley40: [0, 0], pulley20htd: N.motor_xy, pulley60: N.stud, pulley20gt2: N.enc };
+const pivots = {}, meshes = {};
+for (const [name, m] of Object.entries(DATA.meshes)) {
+  if (name.startsWith('cb_')) continue;
+  const [color, , metal] = PARTS[name] || ['#999', null, 0.2];
+  const mesh = new THREE.Mesh(decode(m), mat(color, metal, 0.45, { flatShading: true }));
+  meshes[name] = mesh;
+  if (SPIN[name]) {
+    const g = new THREE.Group(); g.position.set(SPIN[name][0], SPIN[name][1], 0);
+    mesh.position.set(-SPIN[name][0], -SPIN[name][1], 0); g.add(mesh); root.drive.add(g); pivots[name] = g;
+  } else root.drive.add(mesh);
+}
+// motor body scaled to the chosen motor's length (the CAD still holds the placeholder motor_len until the motor is measured)
+{
+  const g = meshes.motor.geometry, p = g.attributes.position.array, f = N.motor_face_z, s = MOTOR_LEN / N.motor_len;
+  for (let i = 2; i < p.length; i += 3) if (p[i] > f + 0.01) p[i] = f + (p[i] - f) * s;
+  g.attributes.position.needsUpdate = true; g.computeVertexNormals();
+}
+const MOTOR_BACK = N.motor_face_z + MOTOR_LEN;
+// the motor's cable outlet block (57CME13: two pigtails from a block near the back), turned towards the hinge (-X): see door_cable_gap
+box(N.motor_box[0] - 12, N.motor_box[0], N.motor_xy[1] - 12, N.motor_xy[1] + 12, MOTOR_BACK - 26, MOTOR_BACK - 6, M.black, root.drive);
+
+// ---------------------------------------------------------------- the lathe (drawn from the photos: approximate)
+const BLUE_OUTLINE = [[-310.4, -92.6], [53.2, -92.6], [53.2, 125.3], [-27, 264.3], [-235.6, 264.3], [-310.4, 181.4]];
+const HINGE_X = N.hinge[0];
+// cable holes in the end panel: 12 mm grommets A1 (motor power), A2 (motor encoder), B (spindle encoder); sw = the lathe's own switch lead
+const GROMMETS = { a1: [-40, -82], a2: [-40, -67], b: [30, 64], sw: [-104, -80] };
+// end panel (sheet metal) with the cable grommets
+{
+  const sh = new THREE.Shape(BLUE_OUTLINE.map(([x, y]) => new THREE.Vector2(x, y)));
+  for (const [x, y] of Object.values(GROMMETS)) { const h = new THREE.Path(); h.absarc(x, y, 6, 0, Math.PI * 2, true); sh.holes.push(h); }
+  const panel = new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: 3, bevelEnabled: false, curveSegments: 24 }), M.blue);
+  panel.position.z = -3; root.lathe.add(panel);
+  for (const [x, y] of Object.values(GROMMETS)) { const r = new THREE.Mesh(new THREE.TorusGeometry(6, 1.8, 10, 24), M.rubber); r.position.set(x, y, 0); root.lathe.add(r); }
+}
+// rear housing of the lathe's motor and belt (behind the headstock), headstock casting with rounded top
+box(-310, -205, -92, 182, -3, -230, M.blue);
+{
+  const s = new THREE.Shape(), x0 = -205, x1 = 15, y0 = BED_Y - 8, y1 = 248, r = 26;
+  s.moveTo(x0, y0); s.lineTo(x1, y0); s.lineTo(x1, y1 - r); s.quadraticCurveTo(x1, y1, x1 - r, y1); s.lineTo(x0 + r, y1);
+  s.quadraticCurveTo(x0, y1, x0, y1 - r); s.lineTo(x0, y0);
+  const head = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: -Z_HEAD - 3, bevelEnabled: true, bevelSize: 3, bevelThickness: 3, bevelSegments: 2 }), M.blue);
+  head.position.z = Z_HEAD; root.lathe.add(head);
+  // the lathe's own controls on the headstock front: two speed levers (A, B), spindle switch with start / stop
+  box(18.5, 20.5, 70, 205, -40, -250, mat('#c9ccd1', 0.3, 0.5));
+  for (const z of [-90, -170]) { cylX(5, 18, 34, M.black, 150, z, 16); const k = new THREE.Mesh(new THREE.SphereGeometry(10, 20, 12), M.red); k.position.set(42, 150, z); root.lathe.add(k); }
+  box(18, 34, 88, 132, -205, -245, M.black);
+  cylX(7, 34, 39, mat('#2fae5a', 0.1, 0.4), 120, -215, 20); cylX(7, 34, 39, M.red, 100, -215, 20); cylX(9, 34, 44, M.black, 110, -237, 6);
+}
+// leadscrew bearing housing under the headstock front, leadscrew, bed, ways, rack, feet
+box(-25, 22, -32, 34, -3, -130, M.blueDark);
+const lsTex = (() => {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d');
+  g.fillStyle = '#c9ced5'; g.fillRect(0, 0, 64, 64); g.strokeStyle = '#6f7680'; g.lineWidth = 9;
+  for (let i = -64; i < 128; i += 21) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 64, 64); g.stroke(); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 140); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const leadscrew = cylZ(8, -130, Z_BED_END - 10, new THREE.MeshStandardMaterial({ map: lsTex, metalness: 0.7, roughness: 0.35 }), 0, 0, 24, root.lathe);
+box(-25, 22, -32, 20, Z_BED_END + 5, Z_BED_END - 25, M.blueDark);             // end bearing bracket
+box(-175, -25, BED_Y - 75, BED_Y - 8, -3, Z_BED_END, M.bed);                   // bed casting
+box(-175, -142, BED_Y - 8, BED_Y, Z_HEAD - 2, Z_BED_END, M.steel);             // ways
+box(-58, -25, BED_Y - 8, BED_Y, Z_HEAD - 2, Z_BED_END, M.steel);
+{
+  const c = document.createElement('canvas'); c.width = 8; c.height = 64; const g = c.getContext('2d');
+  g.fillStyle = '#9aa1a9'; g.fillRect(0, 0, 8, 64); g.fillStyle = '#3c4148'; for (let i = 0; i < 64; i += 8) g.fillRect(0, i, 8, 4);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 50);
+  box(-25, -21, BED_Y - 40, BED_Y - 24, Z_HEAD - 10, Z_BED_END + 10, new THREE.MeshStandardMaterial({ map: t, metalness: 0.6, roughness: 0.4 }));
+}
+box(-195, -5, -100, BED_Y - 75, -25, -270, M.bed);                             // headstock foot
+box(-195, -5, -100, BED_Y - 75, -985, -1090, M.bed);                           // tailstock-end foot
+// spindle nose, 3-jaw chuck and the work (they turn with the spindle)
+const chuck = new THREE.Group(); chuck.position.set(SP[0], SP[1], 0); root.lathe.add(chuck);
+{
+  chuck.add(cylZ(32, Z_HEAD, Z_HEAD - 12, M.steel));
+  chuck.add(cylZ(50, Z_HEAD - 12, Z_HEAD - 60, mat('#9198a0', 0.8, 0.35), 0, 0, 64));
+  for (let k = 0; k < 3; k++) {
+    const jaw = new THREE.Group(); jaw.rotation.z = k * 2 * Math.PI / 3; chuck.add(jaw);
+    box(16, 47, -7, 7, Z_HEAD - 60, Z_HEAD - 78, M.steel, jaw);
+    const hole = cylX(4, 46, 51, M.black, 0, Z_HEAD - 36, 12, jaw); hole.rotation.z = Math.PI / 2;
+  }
+  chuck.add(cylZ(12, Z_HEAD - 60, Z_HEAD - 250, mat('#d8c9a3', 0.6, 0.35), 0, 0, 32));
+  box(9.5, 12.6, -2, 2, Z_HEAD - 80, Z_HEAD - 250, mat('#7e6f4c', 0.3, 0.6), chuck);   // a flat, so the work is seen turning
+}
+// carriage: saddle, apron with handwheel and half-nut lever, cross slide with handwheel, compound, 4-way tool post, tool
+const carriage = new THREE.Group(); root.lathe.add(carriage);
+{
+  const cm = M.blue;
+  box(-185, -15, BED_Y, BED_Y + 16, -72, 72, cm, carriage);
+  box(-15, 28, -95, BED_Y + 16, -85, 85, cm, carriage);
+  const aw = handwheel(36); aw.rotation.y = Math.PI / 2; aw.position.set(36, -40, 40); carriage.add(aw);
+  const lever = cylX(4, 28, 52, M.black, -72, -45, 16, carriage); lever.rotation.x = 0.4;
+  const lk = new THREE.Mesh(new THREE.SphereGeometry(8, 16, 10), M.red); lk.position.set(54, -66, -45); carriage.add(lk);
+  box(-170, -32, BED_Y + 16, BED_Y + 38, -46, 46, cm, carriage);
+  cylX(5, -32, 30, M.steel, BED_Y + 27, 0, 16, carriage);
+  const cw = handwheel(26); cw.rotation.y = Math.PI / 2; cw.position.set(36, BED_Y + 27, 0); carriage.add(cw);
+  cylX(10, 18, 30, M.steelDark, BED_Y + 27, 0, 32, carriage);                              // graduated dial
+  box(-125, -52, BED_Y + 38, BED_Y + 60, -32, 32, cm, carriage);
+  box(-80, -50, BED_Y + 60, SP[1] + 14, -16, 16, M.steelDark, carriage);                   // 4-way tool post
+  cylY(4, SP[1] + 14, SP[1] + 30, M.black, -65, 0, 12, carriage);
+  const tl = cylX(3.5, -65, -20, M.black, SP[1] + 30, 0, 12, carriage); tl.rotation.y = 0.5;
+  box(SP[0] + 12, -58, SP[1] - 5, SP[1] + 4, -5, 5, mat('#f2c14e', 0.6, 0.35), carriage); // tool, tip at the work surface
+}
+// tailstock: base, body with barrel, quill, centre, handwheel, lock lever
+{
+  const z0 = -935, z1 = -1040;
+  box(-172, -28, BED_Y, BED_Y + 18, z0, z1, M.blue);
+  box(-150, -50, BED_Y + 18, SP[1] - 6, z0 - 8, z1 + 6, M.blue);
+  root.lathe.add(cylZ(32, z0 - 8, z1 + 6, M.blue, SP[0], SP[1], 48));
+  root.lathe.add(cylZ(16, z0 - 8, z0 + 55, M.steel, SP[0], SP[1], 32));
+  const centre = new THREE.Mesh(new THREE.ConeGeometry(11, 26, 24), M.steel); centre.rotation.x = Math.PI / 2; centre.position.set(SP[0], SP[1], z0 + 68); root.lathe.add(centre);
+  const hw = handwheel(40); hw.rotation.y = Math.PI; hw.position.set(SP[0], SP[1], z1 - 8); root.lathe.add(hw);
+  root.lathe.add(cylZ(6, z1 + 6, z1 - 8, M.steel, SP[0], SP[1], 16));
+  cylY(4, SP[1] + 30, SP[1] + 58, M.black, SP[0], z0 - 30, 12); const lk = new THREE.Mesh(new THREE.SphereGeometry(7, 14, 10), M.black); lk.position.set(SP[0], SP[1] + 60, z0 - 30); root.lathe.add(lk);
+}
+// stand: chip tray (stops behind the end panel, the gear end overhangs it) and two cabinets; floor
+{
+  const tray = mat('#8a919a', 0.6, 0.4);
+  box(-290, 160, -112, -100, -20, -1135, tray);
+  box(150, 160, -100, -55, -20, -1135, tray); box(-290, -280, -100, -40, -20, -1135, tray);
+  box(-290, 160, -100, -55, -20, -30, tray); box(-290, 160, -100, -55, -1125, -1135, tray);
+  for (const [za, zb] of [[-15, -380], [-800, -1120]]) {
+    box(-270, 140, -760, -112, za, zb, mat('#c6cacf', 0.05, 0.7));
+    box(140, 142, -730, -140, za - 12, zb + 12, mat('#d0d3d7', 0.05, 0.6));                 // cabinet door
+    cylY(3, -330, -250, M.steelDark, 147, zb + 30, 12);                                  // handle
+  }
+  const grid = new THREE.GridHelper(3200, 32, 0x575c66, 0x383c43); grid.position.set(-100, -760, -520); scene.add(grid);
+}
+// the lathe's own motor-to-headstock belt drive inside the gear end (from the photo); turns when the spindle runs
+function hullPoly(c1, r1, c2, r2, n = 48) {
+  const dx = c2[0] - c1[0], dy = c2[1] - c1[1], d = Math.hypot(dx, dy), base = Math.atan2(dy, dx);
+  const a = Math.acos((r1 - r2) / d), pts = [];
+  for (let i = 0; i <= n; i++) { const t = base + a + (2 * Math.PI - 2 * a) * i / n; pts.push(new THREE.Vector2(c1[0] + r1 * Math.cos(t), c1[1] + r1 * Math.sin(t))); }
+  for (let i = 0; i <= n; i++) { const t = base - a + 2 * a * i / n; pts.push(new THREE.Vector2(c2[0] + r2 * Math.cos(t), c2[1] + r2 * Math.sin(t))); }
+  return pts;
+}
+const lathePulleys = [];
+{
+  const top = [-151.3, 202.8], bot = [-250.3, -33.8];
+  for (const [c, r, z0, z1] of [[top, 51, 14, 44], [bot, 32, 4, 34]]) {
+    const g = new THREE.Group(); g.position.set(c[0], c[1], 0); root.lathe.add(g);
+    g.add(cylZ(r, z0, z1, mat('#2a2c31', 0.3, 0.5), 0, 0, 64));
+    for (let k = 0; k < 4; k++) g.add(cylZ(r * 0.17, z1, z1 + 0.6, M.black, Math.cos(k * Math.PI / 2) * r * 0.55, Math.sin(k * Math.PI / 2) * r * 0.55, 20));
+    g.add(cylZ(r * 0.2, z1, z1 + 3, M.steel, 0, 0, 24));
+    lathePulleys.push([g, r]);
+  }
+  const ring = new THREE.Shape(hullPoly(bot, 29, top, 48)); ring.holes.push(new THREE.Path(hullPoly(bot, 25, top, 44)));
+  const belt = new THREE.Mesh(new THREE.ExtrudeGeometry(ring, { depth: 9, bevelEnabled: false }), M.rubber); belt.position.z = 20; root.lathe.add(belt);
+}
+
+// ---------------------------------------------------------------- gear door with the motor and encoder windows (cad/lib/layout.scad rule)
+const doorPivot = new THREE.Group(); doorPivot.position.x = HINGE_X; scene.add(doorPivot);
+const doorMat = mat('#24578f', 0.1, 0.5, { side: THREE.DoubleSide, transparent: true, opacity: 0.12, depthWrite: false });
+const edgeMat = new THREE.LineBasicMaterial({ color: '#9cc3ff', transparent: true, opacity: 0.85 });
+function swingEdgeX(xFar, zFront) {
+  const [hx, hz] = N.hinge, rc = Math.hypot(xFar - hx, zFront - hz), dz = N.door_depth - hz;
+  return hx + Math.sqrt(Math.max(0, rc * rc - dz * dz));
+}
+const windowFor = (b, zf) => [b[0] - N.cut_clear - N.cable_gap, Math.max(b[1] + N.cut_clear, swingEdgeX(b[1], zf) + N.swing_margin),
+                              b[2] - N.cut_clear_y, b[3] + N.cut_clear_y];
+const rectPath = (x0, x1, y0, y1, P = THREE.Path) => new P([new THREE.Vector2(x0, y0), new THREE.Vector2(x1, y0), new THREE.Vector2(x1, y1), new THREE.Vector2(x0, y1)]);
+{
+  const windows = [];
+  const limit = N.door_depth - N.door_clear;
+  if (MOTOR_BACK > limit) windows.push(windowFor(N.motor_box, MOTOR_BACK));
+  if (N.enc_front_z > limit) windows.push(windowFor(N.enc_box, N.enc_front_z));
+  const local = BLUE_OUTLINE.map(([x, y]) => [x - HINGE_X, y]);
+  const face = new THREE.Shape(local.map(([x, y]) => new THREE.Vector2(x, y)));
+  for (const w of windows) face.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
+  const add = (mesh) => { doorPivot.add(mesh); const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeMat);
+                          e.position.copy(mesh.position); e.rotation.copy(mesh.rotation); doorPivot.add(e); };
+  const front = new THREE.Mesh(new THREE.ExtrudeGeometry(face, { depth: N.door_t, bevelEnabled: false }), doorMat);
+  front.position.z = N.door_depth; add(front);
+  for (let i = 0; i < local.length; i++) {
+    const [x0, y0] = local[i], [x1, y1] = local[(i + 1) % local.length], len = Math.hypot(x1 - x0, y1 - y0);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(len, N.door_t, N.door_depth), doorMat);
+    wall.position.set((x0 + x1) / 2, (y0 + y1) / 2, N.door_depth / 2); wall.rotation.z = Math.atan2(y1 - y0, x1 - x0); add(wall);
+  }
+  const [bw, bt] = N.bezel, xMax = BLUE_OUTLINE[1][0], yMin = BLUE_OUTLINE[0][1];
+  for (const w of windows) {
+    const outer = rectPath(w[0] - bw - HINGE_X, Math.min(w[1] + bw, xMax) - HINGE_X, Math.max(w[2] - bw, yMin), w[3] + bw, THREE.Shape);
+    outer.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
+    const bezel = new THREE.Mesh(new THREE.ExtrudeGeometry(outer, { depth: bt, bevelEnabled: false }), mat('#353b46', 0.1, 0.6));
+    bezel.position.z = N.door_depth + N.door_t; doorPivot.add(bezel);
+  }
+}
+
+// ---------------------------------------------------------------- control box: the printed parts exported from cad/control_box.scad
+// cbox frame: x = panel right, y = up, z = out of the panel (front face at z = PT, rear rim at z = -CD). Mounted on an arm off the
+// headstock top through the M6 holes in its two ears, facing the operator (+X).
+const [CW, CH, CD] = N.cb, PT = 4;
+const cbox = new THREE.Group(); cbox.position.set(125, 372, -170); cbox.rotation.y = Math.PI / 2; scene.add(cbox);
+{
+  const cad = new THREE.Group(); cad.rotation.y = Math.PI; cbox.add(cad);       // scad: viewer at -Z, x mirrored
+  const cbMats = { cb_panel: mat('#2c3038', 0.1, 0.55), cb_frame: mat('#353a43', 0.1, 0.6), cb_lid: mat('#2a2d33', 0.1, 0.6) };
+  for (const k of Object.keys(cbMats)) cad.add(new THREE.Mesh(decode(DATA.meshes[k]), cbMats[k]));
+}
+const gridPt = (r, c) => [N.btn_grid[0] + (c - 1) * N.btn_pitch[0], N.btn_grid[1] + (1 - r) * N.btn_pitch[1]];
+const KEYS = [[['MODE', 1], ['UNITS', 2], ['DIR', 3]], [['JOG <', 6], ['RETURN', 8], ['JOG >', 7]], [['STOP L', 4], ['', -1], ['STOP R', 5]]];
+// engraved labels (paint-filled), at the positions control_box.scad engraves them (text top edge at the given y)
+{
+  const S = 8, c = document.createElement('canvas'); c.width = CW * S; c.height = CH * S; const g = c.getContext('2d');
+  const P = (x, y) => [(x + CW / 2) * S, (CH / 2 - y) * S];
+  g.fillStyle = '#f2c230'; g.beginPath(); g.arc(...P(...N.estop), 25.5 * S, 0, Math.PI * 2); g.fill();      // E-stop legend plate
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  const text = (t, x, yTop, size = 3.4, col = '#e3e6ec') => { g.fillStyle = col; g.font = `bold ${size * S}px "Liberation Sans", Arial, sans-serif`; g.fillText(t, ...P(x, yTop)); };
+  for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) { const [x, y] = gridPt(r, k); if (KEYS[r][k][0]) text(KEYS[r][k][0], x, y - N.btn_d / 2 - 1.5); }
+  text('NUT', N.nut[0], N.nut[1] - 16, 4.2); text('PITCH / JOG', N.knob[0], N.knob[1] - 14); text('FAULT', N.led[0], N.led[1] - 5.6);
+  text('E-STOP', N.estop[0], N.estop[1] - 20, 3.4, '#1b1b1b');
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  const decal = new THREE.Mesh(new THREE.PlaneGeometry(CW, CH), new THREE.MeshBasicMaterial({ map: t, transparent: true, toneMapped: false, depthWrite: false }));
+  decal.position.z = PT + 0.08; cbox.add(decal);
+  // corner screws (M3 flat head, flush), PG7 glands under the box
+  const pcx = (CW - 2 * N.cb_wall) / 2 - N.cb_post / 2, pcy = (CH - 2 * N.cb_wall) / 2 - N.cb_post / 2;
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) cylZ(3.1, PT - 0.2, PT + 0.15, M.steelDark, sx * pcx, sy * pcy, 20, cbox);
+  for (const gx of N.gland_x) {
+    const nut = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 5, 6), M.black); nut.position.set(gx, -CH / 2 - 2.5, -GLAND_Z); cbox.add(nut);
+    const dome = new THREE.Mesh(new THREE.CylinderGeometry(5, 7, 9, 20), M.black); dome.position.set(gx, -CH / 2 - 9.5, -GLAND_Z); cbox.add(dome);
+  }
+}
+// screen: the firmware's own UI renderer draws into this canvas (ILI9341, 320 x 240), set in the panel window
+const tftCanvas = document.createElement('canvas'); tftCanvas.width = 320; tftCanvas.height = 240;
+const tft = tftCanvas.getContext('2d'); tft.fillStyle = '#000'; tft.fillRect(0, 0, 320, 240);
+const tftTex = new THREE.CanvasTexture(tftCanvas); tftTex.colorSpace = THREE.SRGBColorSpace; tftTex.minFilter = THREE.LinearFilter;
+{
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(N.tft_win[0], N.tft_win[1]), new THREE.MeshBasicMaterial({ map: tftTex, toneMapped: false }));
+  scr.position.set(N.tft_pos[0], N.tft_pos[1], 0.5); cbox.add(scr);
+}
+// purchased controls: 16 mm metal keys, 22 mm NUT key with LED ring, 22 mm twist-release E-stop, EC11 knob, 8 mm FAULT LED
+const clickables = [], keyMeshes = {};
+for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+  const [, id] = KEYS[r][c], [x, y] = gridPt(r, c);
+  if (id < 0) { cylZ(9, PT, PT + 1.2, M.black, x, y, 32, cbox); continue; }                    // spare hole: blanking plug
+  cylZ(9.2, PT, PT + 1.6, M.steel, x, y, 40, cbox);
+  const cap = cylZ(6.6, PT + 1.6, PT + 3.4, mat('#9aa0a8', 0.85, 0.3), x, y, 32, cbox);
+  cap.userData = { btn: id, z: cap.position.z }; clickables.push(cap); keyMeshes[id] = cap;
+}
+const nutRingM = new THREE.MeshStandardMaterial({ color: '#1d4d2c', emissive: '#000000', metalness: 0.1, roughness: 0.4 });
+{
+  cylZ(13.5, PT, PT + 2.2, M.steel, N.nut[0], N.nut[1], 48, cbox);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(10.6, 1.1, 10, 48), nutRingM); ring.position.set(N.nut[0], N.nut[1], PT + 2.4); cbox.add(ring);
+  const cap = cylZ(9, PT + 2, PT + 4.4, mat('#b6bcc4', 0.85, 0.28), N.nut[0], N.nut[1], 40, cbox);
+  cap.userData = { btn: 0, z: cap.position.z }; clickables.push(cap); keyMeshes[0] = cap;
+}
+const estop = new THREE.Group(); estop.position.set(N.estop[0], N.estop[1], PT); cbox.add(estop);
+{
+  estop.add(cylZ(14, 0, 10, M.black, 0, 0, 32));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(N.estop_d / 2, 48, 18, 0, Math.PI * 2, 0, Math.PI / 2.7), mat('#c62a1f', 0.05, 0.35));
+  head.rotation.x = Math.PI / 2; head.position.z = 3; head.userData = { estop: true }; estop.add(head); clickables.push(head);
+}
+const knob = new THREE.Group(); knob.position.set(N.knob[0], N.knob[1], PT); cbox.add(knob);
+{
+  const k = new THREE.Mesh(new THREE.CylinderGeometry(10, 11, 15, 40), mat('#2b2e33', 0.8, 0.35)); k.rotation.x = Math.PI / 2; k.position.z = 7.5;
+  k.userData = { knob: true }; knob.add(k); clickables.push(k);
+  box(-0.8, 0.8, 4, 9.5, 14.9, 15.4, mat('#e8eaee', 0.1, 0.5), knob);
+}
+const ledM = new THREE.MeshStandardMaterial({ color: '#4a1410', emissive: '#000000', roughness: 0.3 });
+cylZ(5, PT, PT + 1.5, M.steel, N.led[0], N.led[1], 24, cbox);
+{ const led = new THREE.Mesh(new THREE.SphereGeometry(3.4, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), ledM); led.rotation.x = Math.PI / 2; led.position.set(N.led[0], N.led[1], PT + 1.5); cbox.add(led); }
+// mounting: a yoke on the two ears (M6), an arm back to a magnetic base on the headstock top
+const earX = CW / 2 + N.ear[0] - 6, earZ = -CD + 2;
+for (const sx of [-1, 1]) { cylZ(3, earZ, earZ - 14, M.steel, sx * earX, 0, 16, cbox); cylZ(5.5, earZ + 3, earZ, M.steel, sx * earX, 0, 6, cbox); }
+box(-earX - 10, earX + 10, -12, 12, earZ - 14, earZ - 20, M.steelDark, cbox);                    // yoke bar
+box(-10, 10, -12, 12, earZ - 20, earZ - 110, M.steelDark, cbox);                                // arm back towards the headstock
+scene.updateMatrixWorld(true);
+{
+  const a = cbox.localToWorld(new THREE.Vector3(0, 0, earZ - 110));
+  box(a.x - 12, a.x + 12, 248, a.y + 12, a.z - 12, a.z + 12, M.steelDark);                         // post
+  box(a.x - 30, a.x + 30, 248, 278, a.z - 32, a.z + 32, M.black);                                   // magnetic base
+  cylX(5, a.x + 30, a.x + 42, M.red, 265, a.z, 16);                                                // its on/off knob
+}
+
+// ---------------------------------------------------------------- electrical box on the left cabinet's end (docs/WIRING.md 1.1, 3, 10)
+// ebox frame: x = world X, y = up, z = out of the cabinet end (world +Z). Door hinged on the left; it opens in its own view.
+// WIRING 10.3: motor and 48 V wiring on one side, signal wiring on the other, >= 100 mm apart. So the driver stands upright in the
+// middle-left: its step/dir/enable/alarm header (top end) faces the signal side (top: terminals X1, the roof glands to the control box);
+// its motor and power terminals (bottom end) face the power side (bottom: 48 V supply, F2, K1, the motor glands in the left wall).
+// Mains (inlet, F1, X2, PE bar) sits bottom right; the 5 V module and F4 between them on the right.
+const ebox = new THREE.Group(); ebox.position.set(-75, -320, -15); scene.add(ebox);
+let eDoor = null, eDoorAngle = 0;
+const EW = 380, EH = 400, ED = 140;
+const EPARTS = {   // name: [x0, x1, y0, y1, depth]  (box-local; front face at z = 4 + depth)
+  X1: [60, 100, 150, 186, 40], F4: [120, 132, 40, 80, 40], IRM: [110, 154, -20, 16, 30],
+  drv: [-150, -75, -40, 78, 36], F2: [-30, -18, -50, -10, 40], K1: [0, 36, -56, -4, 50],
+  PSU: [-150, 65, -190, -75, 34], X2: [100, 140, -110, -74, 40], F1: [150, 162, -110, -70, 40], PE: [100, 170, -178, -168, 8],
+};
+{
+  const sm = mat('#b9bec5', 0.5, 0.45);
+  box(-EW / 2, EW / 2, -EH / 2, EH / 2, 0, 2, sm, ebox);                                           // back
+  box(-EW / 2, -EW / 2 + 2, -EH / 2, EH / 2, 0, ED, sm, ebox); box(EW / 2 - 2, EW / 2, -EH / 2, EH / 2, 0, ED, sm, ebox);
+  box(-EW / 2, EW / 2, EH / 2 - 2, EH / 2, 0, ED, sm, ebox); box(-EW / 2, EW / 2, -EH / 2, -EH / 2 + 2, 0, ED, sm, ebox);
+  const door = new THREE.Group(); door.position.set(-EW / 2, 0, ED); ebox.add(door); eDoor = door;
+  box(0, EW, -EH / 2, EH / 2, 0, 2, sm, door); cylY(4, -20, 20, M.black, EW - 20, 4, 12, door);
+  box(-EW / 2 + 10, EW / 2 - 10, -EH / 2 + 10, EH / 2 - 10, 2, 4, mat('#d8dadd', 0.6, 0.4), ebox);  // mounting plate
+  const look = {
+    X1: [mat('#2d6fbf', 0.05, 0.6), ['X1', '+5   0V'], '#ffffff'], F4: [mat('#e7e8ea', 0.05, 0.6), ['F4', '5 V'], null],
+    IRM: [M.black, ['5 V', 'IRM-20-5'], '#e6e6e6'], drv: [mat('#24262b', 0.3, 0.45), ['CL57', 'driver'], '#e6e6e6'],
+    F2: [mat('#e7e8ea', 0.05, 0.6), ['F2', '48'], null], K1: [mat('#e9ebee', 0.05, 0.5), ['K1', 'G2R-2'], null],
+    PSU: [mat('#c8ccd2', 0.8, 0.35), ['MEAN WELL  LRS-350-48', '48 V  7.3 A'], null], X2: [mat('#7a5a3a', 0.05, 0.6), ['X2', 'L    N'], '#ffffff'],
+    F1: [mat('#e7e8ea', 0.05, 0.6), ['F1', 'AC'], null], PE: [M.brass, null, null],
+  };
+  for (const [k, [x0, x1, y0, y1, d]] of Object.entries(EPARTS)) {
+    const [m, lines, fg] = look[k];
+    box(x0, x1, y0, y1, 4, 4 + d, m, ebox);
+    if (lines) { const t = textPlane(lines, x1 - x0 - 3, Math.min(30, (y1 - y0) * 0.6), { fg: fg || '#1b1d22' });
+                 t.position.set((x0 + x1) / 2, (y0 + y1) / 2, 4 + d + 0.2); ebox.add(t); }
+  }
+  box(-139, -112, 73, 78, 4, 42, mat('#3aa65a', 0.05, 0.6), ebox);                                 // driver signal header (top end)
+  box(-150, -140, 64, 78, 4, 44, M.steelDark, ebox);                                               // driver motor-encoder socket (top end)
+  box(-150, -86, -40, -35, 4, 42, mat('#3aa65a', 0.05, 0.6), ebox);                                // driver motor / power terminals (bottom end)
+  box(30, 65, -80, -75, 4, 40, M.black, ebox);                                                     // PSU terminal block (L N FG -V +V)
+  box(176, EW / 2 - 2, -166, -134, 40, 60, M.black, ebox);                                         // IEC inlet + switch, right wall, terminals inside
+  box(EW / 2, EW / 2 + 14, -168, -132, 40, 80, M.black, ebox); box(EW / 2 + 14, EW / 2 + 16, -158, -142, 52, 68, M.red, ebox);
+  cylZ(4, 4, 14, M.brass, 180, -190, 10, ebox);                                                    // PE stud on the enclosure
+  for (const x of [110, 125, 140, 155]) cylZ(2.5, 12, 16, M.brass, x, -170, 10, ebox);
+  // K1 flyback diode (1N4007) across the coil, cathode (band) towards A1 = +5 V
+  cylX(1.6, 8, 28, M.black, 6, 56, 12, ebox); cylX(1.7, 8.5, 10.5, mat('#d8dadd'), 6, 56, 12, ebox);
+}
+// glands: on the roof (signal side) the motor encoder lead, the step/dir signals and the 5 V + E-stop / K1 cable; in the left wall
+// (power side) the motor power (metal, 360-degree shield clamp); in the right wall the PE strap.
+// [wall, position along the wall (x for the roof, y for a side wall), z]
+const EGL = { menc: ['roof', -145, 70], sig: ['roof', 20, 70], pwr: ['roof', 120, 70], mpow: ['left', -66, 70], pe: ['right', -100, 70] };
+const glandAt = (k, d) => { const [wl, a, z] = EGL[k];   // a point on the gland axis, d mm out from the wall's outer face (negative = inside)
+  return wl === 'roof' ? [a, EH / 2 + d, z] : wl === 'left' ? [-EW / 2 - d, a, z] : [EW / 2 + d, a, z]; };
+for (const [k, [wl, a, z]] of Object.entries(EGL)) {
+  const m = k === 'mpow' ? M.steel : M.black;
+  if (wl === 'roof') { cylY(9, EH / 2, EH / 2 + 5, m, a, z, 6, ebox); cylY(6, EH / 2 + 5, EH / 2 + 13, m, a, z, 20, ebox); }
+  else { const s = wl === 'left' ? -1 : 1; cylX(9, s * EW / 2, s * (EW / 2 + 5), m, a, z, 6, ebox); cylX(6, s * (EW / 2 + 5), s * (EW / 2 + 13), m, a, z, 20, ebox); }
+}
+scene.updateMatrixWorld(true);
+const eW = (x, y, z) => ebox.localToWorld(new THREE.Vector3(x, y, z)).toArray();
+const cW = (x, y, z) => cbox.localToWorld(new THREE.Vector3(x, y, z)).toArray();
+
+// ---------------------------------------------------------------- cables
+// Every cable is a tube along a centripetal Catmull-Rom curve; CABLES keeps them for the clearance self-check (window.__cableCheck).
+const CABLES = []; window.__cables = CABLES;
+function cable(name, points, r, m, inside = false, cls = null) {
+  const P = points.map((p) => new THREE.Vector3(...p));
+  let curve;
+  if (inside === 'poly') { curve = new THREE.CurvePath(); for (let i = 1; i < P.length; i++) if (P[i].distanceTo(P[i - 1]) > 1e-6) curve.add(new THREE.LineCurve3(P[i - 1], P[i])); }
+  else curve = new THREE.CatmullRomCurve3(P, false, 'centripetal');
+  root.cables.add(new THREE.Mesh(new THREE.TubeGeometry(curve, inside === 'poly' ? Math.max(120, points.length * 40) : Math.max(80, points.length * 30), r, 8, false), m));
+  CABLES.push({ name, curve, r, inside: !!inside, cls });
+}
+const C = { motor: mat('#5b6068', 0.1, 0.6), menc: mat('#1b1c1f', 0.1, 0.6), enc: mat('#15161a', 0.1, 0.6), sig: mat('#2b4f86', 0.1, 0.5),
+            est: mat('#8c2b2b', 0.1, 0.5), mains: mat('#2c2c2c', 0.1, 0.6), pe: mat('#3f9b3f', 0.1, 0.5), w: (c) => mat(c, 0.1, 0.5) };
+// Motor: two pigtails (power 7.2 mm, encoder 5.6 mm) from the outlet block on the hinge side, back into the compartment through the
+// window's cable gap, each through its own 12 mm grommet (A1, A2) in the end panel, then down behind the panel, under the door, to the
+// electrical box. Outside the door they stay in the window band, where the opening door passes them.
+{
+  const ox = N.motor_box[0] - 12, oy = N.motor_xy[1], oz = MOTOR_BACK - 16, [ax, a1] = GROMMETS.a1, [, a2] = GROMMETS.a2;
+  const gp = eW(...glandAt('mpow', 13)), ge = eW(...glandAt('menc', 13));
+  cable('motor power', [[ox + 2, oy - 7, oz], [ox - 0.5, oy - 7, oz - 9], [ox - 0.5, oy - 8, 62], [ax - 0.5, a1 + 8, 34], [ax, a1, 10], [ax, a1, 2],
+         [ax, a1, -8], [ax, -96, -12], [ax, -108, 0], [ax - 12, -110, 12], [-200, -110, 14], [-292, -112, 30], [-292, gp[1], gp[2]], [gp[0] - 6, gp[1], gp[2]], gp], 3.6, C.motor, false, 'power');
+  cable('motor encoder', [[ox + 2, oy + 7, oz], [ox - 0.5, oy + 7, oz - 9], [ox - 0.5, oy + 6, 62], [ax - 0.5, a2 + 6, 34], [ax, a2, 10], [ax, a2, 2],
+         [ax, a2, -8], [ax - 10, a2 - 12, -12], [ax - 10, -96, -12], [ax - 10, -99, 6], [ax - 10, -98, 34], [-120, -96, 50], [ge[0], -96, ge[2]], [ge[0], ge[1] + 4, ge[2]], ge], 2.8, C.menc, false, 'signal');
+}
+// Spindle encoder: lead out of the hinge side of the body, back in through its window's cable gap, grommet B, then up the headstock front
+// face (P-clips) to gland 0 of the control box. The signals cable (blue) and the 5 V + E-stop / K1 cable (red) run beside it.
+const g0 = cW(N.gland_x[0], -CH / 2 - 14, -GLAND_Z), g1 = cW(N.gland_x[1], -CH / 2 - 14, -GLAND_Z), g2 = cW(N.gland_x[2], -CH / 2 - 14, -GLAND_Z);
+const COL = { enc: 30, sig: 39, est: 48 }, ZB = -12;                 // cable columns behind the panel (X), and their Z
+{
+  const [ex, ey] = N.enc, z = N.enc_front_z - 6, [bx, by] = GROMMETS.b;
+  cable('spindle encoder', [[ex - 18.5, ey - 4, z], [ex - 27, ey - 6, z - 4], [ex - 30, ey - 10, 50], [ex - 30, 66, 46], [-8, 58, 44], [bx - 4, by - 2, 24],
+         [bx, by, 8], [bx, by, -4], [COL.enc, by + 10, ZB], [COL.enc, 150, ZB], [COL.enc, 226, ZB], [COL.enc, 234, -60], [COL.enc + 2, 238, g0[2]],
+         [55, 240, g0[2]], [g0[0], 244, g0[2]], [g0[0], g0[1] - 8, g0[2]], g0], 2.6, C.enc);
+}
+{
+  const gs = eW(...glandAt('sig', 13)), gx = eW(...glandAt('pwr', 13));
+  cable('signals', [gs, [gs[0], gs[1] + 6, gs[2]], [gs[0] + 10, -96, 40], [5, -100, 14], [COL.sig, -100, ZB], [COL.sig, -40, ZB], [COL.sig, 150, ZB],
+         [COL.sig, 226, ZB], [COL.sig, 248, -80], [COL.sig + 2, 252, g1[2]], [60, 254, g1[2]], [g1[0], 257, g1[2]], [g1[0], g1[1] - 8, g1[2]], g1], 3.4, C.sig, false, 'signal');
+  cable('5 V + E-stop / K1', [gx, [gx[0], gx[1] + 6, gx[2]], [gx[0], -100, 50], [30, -100, 26], [COL.est, -100, ZB], [COL.est, -40, ZB], [COL.est, 150, ZB],
+         [COL.est, 226, ZB], [COL.est, 262, -100], [COL.est + 2, 266, g2[2]], [64, 268, g2[2]], [g2[0], 270, g2[2]], [g2[0], g2[1] - 8, g2[2]], g2], 3.0, C.est);
+}
+// P-clips holding the three cables to the headstock front face
+for (const y of [90, 160, 218]) box(24, 54, y - 5, y + 5, ZB + 6, ZB - 6, M.black);
+// mains to the wall; PE strap from the PE bar, out of its right-wall gland, to a bolt on the headstock foot
+cable('mains', [eW(EW / 2 + 14, -150, 60), eW(EW / 2 + 40, -150, 60), eW(EW / 2 + 60, -300, 120), eW(EW / 2 + 70, -440, 160)], 4.2, C.mains);
+{ const gq = eW(...glandAt('pe', 13));
+  cable('PE strap', [gq, [gq[0] + 8, gq[1], gq[2]], [gq[0] + 12, gq[1] + 30, gq[2] + 5], [gq[0] + 12, -118, 40], [62, -100, 20], [62, -46, -2], [62, -46, -38], [12, -48, -45], [3, -70, -45]], 2.2, C.pe); }
+cylX(4, -5, 2, M.steel, -70, -45, 6);
+// the lathe's own door switch keeps its own lead into the lathe (its spindle circuit), through its own hole in the panel
+cable("lathe's door-switch lead", [[-90, -84, 8], [-100, -86, 5], [GROMMETS.sw[0], GROMMETS.sw[1], 1], [GROMMETS.sw[0], GROMMETS.sw[1], -6],
+       [GROMMETS.sw[0], -52, -14], [GROMMETS.sw[0], -45, -21.5]], 2.2, C.w('#2a2a2a'));   // into a hole in the foot
+// Inside the electrical box (docs/WIRING.md 1.1, 3.2-3.4, 7.8, 10): one tube per conductor. Each wire rises from its terminal to its
+// own height layer, runs along the lanes (the gaps between the parts) and drops onto the other terminal or into a gland. Wires whose
+// runs or legs come within 4 mm in plan get different layers, so no two can touch. The driver's eight signal conductors close up into
+// the signal cable above the driver; its four motor phases into the motor cable below it.
+{
+  const LANE = { top: ['y', 190, 55, 175], x1b: ['y', 140, 55, 175], mid: ['y', 28, -60, 175], low: ['y', -64, -110, 175], b: ['y', -135, 90, 175],
+                 right: ['x', 172, -192, 190], c: ['x', -55, -64, 28] };
+  const NODES = [[172, 190], [172, 140], [172, 28], [172, -64], [172, -135], [-55, 28], [-55, -64]];
+  const t = (x, y, z, lane) => ({ x, y, z, lane });
+  const zT = 44, zK = 54, zP = 38, zD = 42;
+  const T = {
+    inL: t(176, -140, 60, 'right'), inN: t(176, -150, 60, 'right'), inPE: t(176, -160, 60, 'right'),
+    f1i: t(156, -110, zT, 'b'), f1o: t(156, -70, zT, 'low'),
+    x2Lt: t(108, -74, zT, 'low'), x2Lb1: t(108, -110, zT, 'b'), x2Lb2: t(112.8, -110, zT, 'b'),
+    x2Nt: t(124, -74, zT, 'low'), x2Nb1: t(124, -110, zT, 'b'), x2Nb2: t(128.8, -110, zT, 'b'),
+    irmL: t(118, -20, 34, 'low'), irmN: t(126, -20, 34, 'low'), irm5: t(138, 16, 34, 'mid'), irm0: t(146, 16, 34, 'mid'),
+    f4i: t(126, 40, zT, 'mid'), f4o: t(126, 80, zT, 'x1b'),
+    x5b: t(66, 150, zT, 'x1b'), x0b1: t(84, 150, zT, 'x1b'), x0b2: t(88.8, 150, zT, 'x1b'), x5t: t(66, 186, zT, 'top'), x0t: t(84, 186, zT, 'top'),
+    pe1: t(110, -168, 12, 'b'), pe2: t(125, -168, 12, 'b'), pe3: t(140, -168, 12, 'b'), pe4: t(155, -168, 12, 'b'), stud: t(180, -190, 14, 'right'),
+    psL: t(34, -75, zP, 'low'), psN: t(40, -75, zP, 'low'), psFG: t(46, -75, zP, 'low'), psM: t(52, -75, zP, 'low'), psP: t(60, -75, zP, 'low'),
+    f2i: t(-24, -50, zT, 'low'), f2o: t(-24, -10, zT, 'mid'),
+    kA1: t(4, -4, zK, 'mid'), k1c: t(12, -4, zK, 'mid'), kA2: t(32, -4, zK, 'mid'), k1n: t(12, -56, zK, 'low'), k2c: t(19, -56, zK, 'low'), k2n: t(27, -56, zK, 'low'),
+    drP: t(-100, -40, zD, 'low'), drM: t(-92, -40, zD, 'low'),
+  };
+  // gland ends: route to an approach point on the lane, then into the gland bore along its axis
+  const G = (k, d1 = 0, d2 = 0, app = 0) => ({ gland: k, d1, d2, app, lane: EGL[k][0] === 'roof' ? 'top' : 'right' });
+  const lanePt = (p) => { const L = LANE[p.lane];
+    if (p.gland) { const [, a] = EGL[p.gland]; return L[0] === 'y' ? [a + p.app, L[1]] : [L[1], a + p.app]; }
+    return L[0] === 'y' ? [p.x, L[1]] : [L[1], p.y]; };
+  // shortest path along the lanes (lanes meet at NODES)
+  function route(a, b) {
+    const A = lanePt(a), B = lanePt(b), pts = [A, B, ...NODES], key = (p) => p.join(',');
+    const on = (p, n) => { const L = LANE[n]; return L[0] === 'y' ? Math.abs(p[1] - L[1]) < 1e-6 && p[0] >= L[2] - 1e-6 && p[0] <= L[3] + 1e-6
+                                                                    : Math.abs(p[0] - L[1]) < 1e-6 && p[1] >= L[2] - 1e-6 && p[1] <= L[3] + 1e-6; };
+    const adj = new Map(pts.map((p) => [key(p), []]));
+    for (const n of Object.keys(LANE)) {
+      const L = LANE[n], ps = pts.filter((p) => on(p, n)).sort((p, q) => (L[0] === 'y' ? p[0] - q[0] : p[1] - q[1]));
+      for (let i = 1; i < ps.length; i++) { const d = Math.abs(ps[i][0] - ps[i - 1][0]) + Math.abs(ps[i][1] - ps[i - 1][1]);
+        adj.get(key(ps[i])).push([ps[i - 1], d]); adj.get(key(ps[i - 1])).push([ps[i], d]); }
+    }
+    const dist = new Map([[key(A), 0]]), prev = new Map(), todo = [A];
+    while (todo.length) {
+      todo.sort((p, q) => dist.get(key(p)) - dist.get(key(q))); const u = todo.shift();
+      for (const [v, d] of adj.get(key(u))) { const nd = dist.get(key(u)) + d;
+        if (nd < (dist.get(key(v)) ?? Infinity)) { dist.set(key(v), nd); prev.set(key(v), u); todo.push(v); } }
+    }
+    const out = [B]; while (key(out[0]) !== key(A)) out.unshift(prev.get(key(out[0])));
+    return out;
+  }
+  const WIRES = [];
+  const w = (a, b, col, r = 1.2) => WIRES.push({ a: typeof a === 'string' ? T[a] : a, b: typeof b === 'string' ? T[b] : b, col, r,
+                                                  name: `${typeof a === 'string' ? a : a.gland}-${typeof b === 'string' ? b : b.gland}`, power: false });
+  const BR = '#7a4a2a', BL = '#2a5db0', GY = '#c8b43a', RD = '#d22f2f', BK = '#1d1d1d', OR = '#e07a1c', RW = '#e8a0a0';
+  // mains: inlet -> F1 -> X2 -> PSU and the 5 V module
+  w('inL', 'f1i', BR); w('f1o', 'x2Lt', BR); w('x2Lb1', 'psL', BR); w('x2Lb2', 'irmL', BR);
+  w('inN', 'x2Nb1', BL); w('x2Nt', 'psN', BL); w('x2Nb2', 'irmN', BL);
+  // PE star: inlet -> PE bar -> PSU FG, enclosure stud, the strap to the lathe
+  w('inPE', 'pe4', GY, 1.4); w('pe1', 'psFG', GY, 1.4); w('pe2', 'stud', GY, 1.4); w('pe3', G('pe'), GY, 1.4);
+  // +48 V through F2 and both K1 poles to the driver; 0 V
+  const P0 = WIRES.length;
+  w('psP', 'f2i', RD, 1.4); w('f2o', 'k1c', RD, 1.4); w('k1n', 'k2c', RD, 1.4); w('k2n', 'drP', RD, 1.4); w('psM', 'drM', BK, 1.4);
+  for (let i = P0; i < WIRES.length; i++) WIRES[i].power = true;
+  // 5 V rail through F4 to X1; to the control box +5 V, 0 V and the return from E-stop NC1 to the K1 coil; coil return
+  w('irm5', 'f4i', OR); w('f4o', 'x5b', OR); w('irm0', 'x0b1', BL, 1.0);
+  w('x5t', G('pwr', -1.1, -0.65, -6), OR, 0.8); w('x0t', G('pwr', 1.1, -0.65, 6), BL, 0.8); w('kA1', G('pwr', 0, 1.25, 0), RW, 0.8);
+  w('kA2', 'x0b2', BL, 1.0);
+  const segsOf = (W) => { const r = route(W.a, W.b), A = W.a.gland ? r[0] : [W.a.x, W.a.y], B = W.b.gland ? r[r.length - 1] : [W.b.x, W.b.y];
+                          W.r2 = r; return [[A, r[0]], ...r.slice(1).map((p, i) => [r[i], p]), [r[r.length - 1], B]]; };
+  const near = (s, u) => {
+    const bx = (q) => [Math.min(q[0][0], q[1][0]), Math.max(q[0][0], q[1][0]), Math.min(q[0][1], q[1][1]), Math.max(q[0][1], q[1][1])];
+    const A = bx(s), B = bx(u); return Math.max(A[0] - B[1], B[0] - A[1], 0) ** 2 + Math.max(A[2] - B[3], B[2] - A[3], 0) ** 2 < 16; };
+  for (const W of WIRES) W.segs = segsOf(W);
+  const LV0 = 60, LVD = 3.4;
+  for (const W of WIRES) {
+    const used = new Set(WIRES.filter((o) => o.level !== undefined && o.segs.some((s) => W.segs.some((u) => near(s, u)))).map((o) => o.level));
+    W.level = 0; while (used.has(W.level)) W.level++;
+  }
+  // into a gland: from the lane, step 6 mm towards the wall, change height there, then close up into the bundle in the bore
+  const glandPts = (g, z, lanePoint) => { const [wl, a, gz] = EGL[g.gland], zf = gz + g.d2;
+    if (wl === 'roof') return [[lanePoint[0], EH / 2 - 4, z], [lanePoint[0], EH / 2 - 4, zf], [a + g.d1, EH / 2 - 1, zf], [a + g.d1, EH / 2 + 13, zf]];
+    const s = wl === 'left' ? -1 : 1; return [[s * (EW / 2 - 12), lanePoint[1], z], [s * (EW / 2 - 12), lanePoint[1], zf], [s * (EW / 2 - 4), a + g.d1, zf], [s * (EW / 2 + 13), a + g.d1, zf]]; };
+  for (const W of WIRES) {
+    const z = LV0 + W.level * LVD, r = W.r2, pts = [];
+    if (W.a.gland) pts.push(...glandPts(W.a, z, r[0]).reverse()); else pts.push([W.a.x, W.a.y, W.a.z], [W.a.x, W.a.y, z]);
+    for (const [x, y] of r) pts.push([x, y, z]);
+    if (W.b.gland) pts.push(...glandPts(W.b, z, r[r.length - 1])); else pts.push([W.b.x, W.b.y, z], [W.b.x, W.b.y, W.b.z]);
+    cable(`box: ${W.name}`, pts.map((p) => eW(...p)), W.r, C.w(W.col), 'poly', W.power ? 'power' : null);
+  }
+  // signal header (top end of the driver): 8 conductors close up into a 2 x 4 bundle, then the signal cable (jacket) to its roof gland
+  const SIGX = [-136, -133, -130, -127, -124, -121, -118, -115], sgx = -125, sjy = 134;
+  SIGX.forEach((x, i) => {
+    const xe = sgx + (Math.floor(i / 2) - 1.5) * 1.6, ze = 70 + ((i % 2) - 0.5) * 1.6;
+    cable(`box: signal ${i + 1}`, [[x, 78, zD], [x, 86, zD + 6], [x, 100, ze], [xe, 130, ze], [xe, sjy + 1, ze]].map((p) => eW(...p)), 0.45, C.w('#2b4f86'), 'poly', 'signal');
+  });
+  cable('box: signal cable jacket', [[sgx, sjy, 70], [sgx, 165, 70], [EGL.sig[1], 165, 70], [EGL.sig[1], EH / 2 + 13, 70]].map((p) => eW(...p)), 3.4, C.w('#2b4f86'), 'poly', 'signal');
+  // motor terminals (bottom end): 4 phases close up into a 2 x 2 bundle, then the motor cable to its left-wall gland; encoder lead beside it
+  const PHX = [-146, -140, -134, -128], pgx = -137, pjy = -58;
+  PHX.forEach((x, i) => {
+    const xe = pgx + (Math.floor(i / 2) - 0.5) * 2.2, ze = 70 + ((i % 2) - 0.5) * 2.2;
+    cable(`box: motor phase ${i + 1}`, [[x, -40, zD], [x, -44, zD + 6], [x, -48, ze], [xe, -54, ze], [xe, pjy - 1, ze]].map((p) => eW(...p)), 0.8, C.w('#6b7078'), 'poly', 'power');
+  });
+  cable('box: motor phase cable jacket', [[pgx, pjy, 70], [pgx, EGL.mpow[1], 70], [-EW / 2 + 20, EGL.mpow[1], 70], [-EW / 2 - 13, EGL.mpow[1], 70]].map((p) => eW(...p)), 3.6, C.w('#5b6068'), 'poly', 'power');
+  cable('box: motor encoder lead', [[-145, 78, 44], [-145, 92, 62], [-145, 150, 70], [-145, EH / 2 + 13, 70]].map((p) => eW(...p)), 2.6, C.w('#1b1c1f'), 'poly', 'signal');
+  // K1 flyback diode leads, A1 to A2 over the body
+  cable('box: K1 flyback diode', [[4, -4, zK], [4, 6, 56], [8, 6, 56], [28, 6, 56], [32, 6, 56], [32, -4, zK]].map((p) => eW(...p)), 0.45, M.steel, 'poly');
+}
+
+// ---------------------------------------------------------------- labels (HTML, readable at any zoom; each view shows its own set)
+const tagsEl = document.getElementById('tags');
+const TAGS = [];
+// pos: world point, or [object, local point] for parts that move (the gear door)
+function tag(html, pos, views) { const el = document.createElement('div'); el.className = 'tag'; el.innerHTML = html; tagsEl.appendChild(el);
+                                 TAGS.push({ el, pos, views }); }
+const motorTop = [N.motor_xy[0], N.motor_box[3], MOTOR_BACK - 20];
+tag('Control box<small>Teensy 4.1 · 2.8" screen · keys · knob · NUT · E-stop</small>', cW(0, CH / 2, -CD / 2), ['overview', 'operator']);
+tag('Electrical box<small>48 V supply · driver · relay K1 · 5 V</small>', eW(0, EH / 2, ED / 2), ['overview']);
+tag('Closed-loop motor<small>through the door window</small>', motorTop, ['overview', 'gear']);
+tag('Spindle encoder', [N.enc[0], N.enc_box[3], N.enc_front_z], ['overview', 'gear']);
+tag('Gear door<small>its switch stops the spindle when opened</small>', [doorPivot, [-200 - HINGE_X, 264, N.door_depth]], ['overview', 'gear']);
+tag('Carriage', [10, BED_Y + 40, Z_TOOL0], ['overview', 'operator']);
+tag('Leadscrew 3 mm', [8, 8, -820], ['overview', 'operator']);
+tag('Base plate on the old banjo seat', [20, 10, 12], ['gear']);
+tag('Cable gap, hinge side of the window<small>leads go back inside, then grommets</small>', [N.motor_box[0] - 16, N.motor_xy[1] + 20, 66], ['gear']);
+tag('Grommets A1 / A2: motor leads', [...GROMMETS.a1, 0], ['gear']);
+tag('Grommet B: encoder lead', [...GROMMETS.b, 0], ['gear']);
+tag("Lathe's own door switch", [-85, -70, 12], ['gear']);
+tag('Display: the firmware UI', cW(N.tft_pos[0], N.tft_pos[1] + N.tft_win[1] / 2, PT), ['box']);
+tag('Ear + M6 yoke → arm → magnetic base', cW(earX, 0, earZ - 17), ['box']);
+tag('Glands: encoder · signals · 5 V + E-stop / K1', cW(0, -CH / 2 - 12, -GLAND_Z), ['box']);
+tag('MEAN WELL LRS-350-48 (48 V)', eW(-60, -140, 38), ['ebox']);
+tag('Leadshine CL57 driver<small>signals + encoder out of the top, motor + 48 V out of the bottom</small>', eW(-112, 20, 40), ['ebox']);
+tag('F2 + K1 relay + flyback diode<small>the E-stop drops K1: 48 V off</small>', eW(18, -30, 54), ['ebox']);
+tag('5 V supply IRM-20-5 + F4', eW(132, 0, 34), ['ebox']);
+tag('X1: 5 V to the control box', eW(80, 168, 44), ['ebox']);
+tag('Mains: inlet + switch, F1, X2, PE bar', eW(140, -120, 44), ['ebox']);
+tag('Signal side: motor encoder, step/dir and 5 V + E-stop cables (roof glands)', eW(20, EH / 2 + 13, 70), ['ebox']);
+tag('Power side: motor power cable (left-wall gland)', eW(-EW / 2 - 13, -66, 70), ['ebox']);
+let tagView = 'overview', subject = null;
+const _v = new THREE.Vector3(), SVGNS = 'http://www.w3.org/2000/svg';
+const leaders = document.createElementNS(SVGNS, 'svg'); leaders.setAttribute('class', 'leaders'); tagsEl.prepend(leaders);
+for (const t of TAGS) { t.line = document.createElementNS(SVGNS, 'line'); t.dot = document.createElementNS(SVGNS, 'circle'); t.dot.setAttribute('r', 3.5);
+                        leaders.append(t.line, t.dot); }
+const tagPos = (t) => (Array.isArray(t.pos[1]) && t.pos[0].isObject3D ? t.pos[0].localToWorld(_v.set(...t.pos[1])) : _v.set(...t.pos));
+// Labels go in columns left and right of the subject (the view fits the subject into the middle of the stage), ordered by their anchors'
+// height and stacked without overlap, with a leader line to the anchor; they stay inside the stage.
+function placeTags() {
+  const show = $('labels').checked, W = tagsEl.clientWidth, H = tagsEl.clientHeight;
+  let sx0 = W * 0.3, sx1 = W * 0.7;
+  if (subject) {
+    sx0 = W; sx1 = 0;
+    for (let i = 0; i < 8; i++) {
+      _v.set(i & 1 ? subject.max.x : subject.min.x, i & 2 ? subject.max.y : subject.min.y, i & 4 ? subject.max.z : subject.min.z).project(camera);
+      const x = (_v.x + 1) / 2 * W; sx0 = Math.min(sx0, x); sx1 = Math.max(sx1, x);
+    }
+  }
+  tagsEl.classList.toggle('compact', W < 560);
+  const vis = [];
+  for (const t of TAGS) {
+    tagPos(t).project(camera);
+    const on = show && t.views.includes(tagView) && _v.z < 1 && Math.abs(_v.x) < 1 && Math.abs(_v.y) < 1;
+    t.el.style.display = on ? '' : 'none'; t.line.style.display = t.dot.style.display = on ? '' : 'none';
+    if (!on) continue;
+    const ax = (_v.x + 1) / 2 * W, ay = (1 - _v.y) / 2 * H;
+    vis.push({ t, ax, ay, w: t.el.offsetWidth, h: t.el.offsetHeight });
+  }
+  // left half of the anchors (by x) to the left column, the rest to the right one, so both columns share the labels
+  const cols = { L: [], R: [] };
+  vis.sort((a, b) => a.ax - b.ax).forEach((it, i) => cols[i < vis.length / 2 ? 'L' : 'R'].push(it));
+  for (const [side, list] of Object.entries(cols)) {
+    list.sort((a, b) => a.ay - b.ay);
+    let y = 4;
+    for (const it of list) { it.y = Math.max(y, it.ay - it.h / 2); y = it.y + it.h + 6; }
+    const over = y - 6 - (H - 4); if (over > 0) for (const it of list) it.y = Math.max(4, it.y - over);
+    for (const it of list) {
+      it.x = side === 'L' ? Math.max(4, Math.min(sx0 - it.w - 16, it.ax - it.w - 16)) : Math.min(W - it.w - 4, Math.max(sx1 + 16, it.ax + 16));
+      it.t.el.style.transform = `translate(${it.x.toFixed(1)}px, ${it.y.toFixed(1)}px)`;
+      const lx = side === 'L' ? it.x + it.w : it.x, ly = Math.min(Math.max(it.ay, it.y + 6), it.y + it.h - 6);
+      it.t.line.setAttribute('x1', it.ax); it.t.line.setAttribute('y1', it.ay); it.t.line.setAttribute('x2', lx); it.t.line.setAttribute('y2', ly);
+      it.t.dot.setAttribute('cx', it.ax); it.t.dot.setAttribute('cy', it.ay);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- clearance self-check (dev): run window.__cableCheck() in the console
+// Cables must not cut solid parts, cross the end panel except through a grommet, sit in the door or its swing, or touch each other.
+window.__cableCheck = () => {
+  const SOL = {   // world AABBs [x0, x1, y0, y1, z0, z1] of the solids near the cable runs
+    'tray end lip': [-290, 160, -100, -55, -30, -20], 'tray bottom': [-290, 160, -112, -100, -1135, -20], 'headstock foot': [-195, -5, -100, BED_Y - 75, -270, -25],
+    'left cabinet': [-270, 140, -760, -112, -380, -15], 'headstock': [-205, 18, BED_Y - 8, 251, -288, -3], 'rear housing': [-310, -205, -92, 182, -230, -3],
+    'leadscrew housing': [-25, 22, -32, 34, -130, -3], 'spindle switch box': [18, 34, 88, 132, -245, -205], 'lever A': [18, 52, 140, 160, -100, -80],
+    'lever B': [18, 52, 140, 160, -180, -160], 'control box': [55, 129, 297, 447, -265, -75], 'magnetic base': [-83, -23, 248, 278, -202, -138],
+    'electrical box': (() => { const o = ebox.position; return [o.x - EW / 2, o.x + EW / 2, o.y - EH / 2, o.y + EH / 2, o.z, o.z + ED]; })(),
+    ...Object.fromEntries(Object.keys(EGL).map((k) => { const a = new THREE.Vector3(...eW(...glandAt(k, 0))), b = new THREE.Vector3(...eW(...glandAt(k, 13)));
+      const bb = new THREE.Box3().setFromPoints([a, b]).expandByScalar(9); return [`gland ${k}`, [bb.min.x, bb.max.x, bb.min.y, bb.max.y, bb.min.z, bb.max.z]]; })),
+  };
+  const holes = Object.values(GROMMETS);
+  const inOutline = (x, y) => { let c = false; for (let i = 0, j = BLUE_OUTLINE.length - 1; i < BLUE_OUTLINE.length; j = i++) {
+    const [xi, yi] = BLUE_OUTLINE[i], [xj, yj] = BLUE_OUTLINE[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  const wins = []; { const lim = N.door_depth - N.door_clear;
+    if (MOTOR_BACK > lim) wins.push(windowFor(N.motor_box, MOTOR_BACK)); if (N.enc_front_z > lim) wins.push(windowFor(N.enc_box, N.enc_front_z)); }
+  const zf = N.door_depth + N.door_t, rDoorMax = Math.hypot(BLUE_OUTLINE[1][0] - HINGE_X, zf);
+  const out = [], samples = CABLES.map((c) => c.curve.getSpacedPoints(c.inside ? 240 : 400));
+  const BOXSOL = Object.fromEntries(Object.entries(EPARTS).map(([k, [x0, x1, y0, y1, d]]) => [k, [x0, x1, y0, y1, 4, 4 + d]]));
+  BOXSOL['PSU terminal block'] = [30, 65, -80, -75, 4, 40]; BOXSOL['flyback diode'] = [8, 28, 4.4, 7.6, 54.4, 57.6]; BOXSOL['inlet terminals'] = [176, EW / 2 - 2, -166, -134, 40, 60];
+  BOXSOL['driver signal header'] = [-139, -112, 73, 78, 4, 42]; BOXSOL['encoder socket'] = [-150, -140, 64, 78, 4, 44]; BOXSOL['driver power terminals'] = [-150, -86, -40, -35, 4, 42];
+  BOXSOL.back = [-EW / 2, EW / 2, -EH / 2, EH / 2, 0, 4]; BOXSOL.roof = [-EW / 2, EW / 2, EH / 2 - 2, EH / 2, 0, ED];
+  BOXSOL['left wall'] = [-EW / 2, -EW / 2 + 2, -EH / 2, EH / 2, 0, ED]; BOXSOL['right wall'] = [EW / 2 - 2, EW / 2, -EH / 2, EH / 2, 0, ED];
+  BOXSOL.floor = [-EW / 2, EW / 2, -EH / 2, -EH / 2 + 2, 0, ED];
+  const inv = new THREE.Matrix4().copy(ebox.matrixWorld).invert(), _l = new THREE.Vector3();
+  const boxes = samples.map((pts) => { const b = new THREE.Box3().setFromPoints(pts); return b; });
+  CABLES.forEach((c, k) => {
+    const bad = {};
+    const pts = samples[k];
+    const p0 = pts[0], p1 = pts[pts.length - 1];
+    pts.forEach((p, i) => {
+      const end = i < 6 || i > pts.length - 7;                          // the last few mm sit in a gland / on a terminal
+      if (c.inside) {                                                   // box-local test against the parts and the walls
+        const nearEnd = p.distanceTo(p0) < 6 || p.distanceTo(p1) < 6;   // on its own terminal
+        _l.copy(p).applyMatrix4(inv);
+        const bore = (wall) => Object.values(EGL).some(([wl, a, gz]) => wl === wall && (wl === 'roof' ? _l.y > EH / 2 - 8 && Math.hypot(_l.x - a, _l.z - gz) < 6 - c.r
+          : (wl === 'left' ? _l.x < -EW / 2 + 8 : _l.x > EW / 2 - 8) && Math.hypot(_l.y - a, _l.z - gz) < 6 - c.r));
+        const inBore = { roof: bore('roof'), 'left wall': bore('left'), 'right wall': bore('right') };
+        for (const [n, b] of Object.entries(BOXSOL)) {
+          if (n in inBore ? inBore[n] : nearEnd) continue;
+          if (n === 'flyback diode' && c.name === 'box: K1 flyback diode') continue;
+          const dx = Math.max(b[0] - _l.x, 0, _l.x - b[1]), dy = Math.max(b[2] - _l.y, 0, _l.y - b[3]), dz = Math.max(b[4] - _l.z, 0, _l.z - b[5]);
+          const d = Math.hypot(dx, dy, dz) - c.r; if (d < 0.3) bad[n] = Math.min(bad[n] ?? 9, +d.toFixed(2));
+        }
+        return;
+      }
+      if (!c.inside) for (const [n, b] of Object.entries(SOL)) {
+        if (n === 'electrical box' && end) continue;
+        if (n.startsWith('gland ') && [pts[0], pts[pts.length - 1]].some((e) => e.distanceTo(new THREE.Vector3(...eW(...glandAt(n.slice(6), 13)))) < 2)) continue;   // its own gland
+        if ((n === 'control box' || n === 'headstock foot') && end) continue;
+        const dx = Math.max(b[0] - p.x, 0, p.x - b[1]), dy = Math.max(b[2] - p.y, 0, p.y - b[3]), dz = Math.max(b[4] - p.z, 0, p.z - b[5]);
+        const d = Math.hypot(dx, dy, dz) - c.r; if (d < 0.3) bad[n] = Math.min(bad[n] ?? 9, +d.toFixed(2));
+      }
+      if (!c.inside && p.z > -3 - c.r && p.z < c.r && inOutline(p.x, p.y)) {        // crossing the end panel
+        const ok = holes.some(([hx, hy]) => Math.hypot(p.x - hx, p.y - hy) <= 6 - c.r + 0.01);
+        if (!ok) bad['end panel (not through a grommet)'] = 0;
+      }
+      if (!c.inside && inOutline(p.x, p.y) && p.z > zf - 1.2 - c.r && p.z < zf + c.r) {   // crossing the closed door
+        if (!wins.some((w) => p.x - c.r >= w[0] && p.x + c.r <= w[1] && p.y - c.r >= w[2] && p.y + c.r <= w[3])) bad['closed door'] = 0;
+      }
+      if (!c.inside && p.z > zf && p.y > BLUE_OUTLINE[0][1] - c.r && p.y < 264.3 + c.r) {  // in the door's swing outside the door
+        const r = Math.hypot(p.x - HINGE_X, p.z), inWin = wins.some((w) => p.y - c.r >= w[2] && p.y + c.r <= w[3] &&
+          r - c.r >= Math.hypot(w[0] - HINGE_X, zf) && r + c.r <= Math.hypot(w[1] - HINGE_X, zf));
+        if (r - c.r < rDoorMax + 1 && !inWin) bad['door swing'] = 0;
+      }
+    });
+    for (let j = k + 1; j < CABLES.length; j++) {
+      if (c.inside !== CABLES[j].inside) continue;
+      const lim = c.r + CABLES[j].r + 0.5;
+      if (boxes[k].distanceToPoint(boxes[j].clampPoint(boxes[k].getCenter(new THREE.Vector3()), new THREE.Vector3())) > lim &&
+          !boxes[k].clone().expandByScalar(lim).intersectsBox(boxes[j])) continue;
+      const cj = CABLES[j], grp = (n) => n.replace(/ (cable jacket|\d+)$/, '');
+      if (c.name.endsWith('jacket') !== cj.name.endsWith('jacket') && grp(c.name) === grp(cj.name)) continue;   // a jacket and its own conductors
+      const ends = (s) => [s[0], s[s.length - 1]], shared = ends(samples[k]).filter((e) => ends(samples[j]).some((f) => e.distanceTo(f) < 2));
+      let m = 1e9;
+      for (const p of samples[k]) { if (shared.some((e) => p.distanceTo(e) < 4)) continue;
+        for (const q of samples[j]) { if (shared.some((e) => q.distanceTo(e) < 4)) continue; m = Math.min(m, p.distanceTo(q)); } }
+      const gap = m - c.r - CABLES[j].r; if (gap < 0.5) out.push(`${c.name} x ${CABLES[j].name}: gap ${gap.toFixed(2)} mm`);
+    }
+    for (const [n, d] of Object.entries(bad)) out.push(`${c.name} / ${n}: ${d} mm`);
+  });
+  { const pw = [], sg = []; CABLES.forEach((c, k) => { if (!c.inside) return; if (c.cls === 'power') pw.push(k); if (c.cls === 'signal') sg.push(k); });
+    let m = 1e9, at = '';
+    for (const i of pw) for (const j of sg) for (const p of samples[i]) for (const q of samples[j]) { const d = p.distanceTo(q) - CABLES[i].r - CABLES[j].r;
+      if (d < m) { m = d; at = `${CABLES[i].name} / ${CABLES[j].name}`; } }
+    if (m < 100) out.push(`WIRING 10.3: motor/48 V wiring ${m.toFixed(1)} mm from the signal wiring (< 100): ${at}`);
+    window.__separation = `${m.toFixed(1)} mm (${at})`; }
+  return out.length ? out : ['all clear'];
+};
+
+// ---------------------------------------------------------------- firmware (WebAssembly from sim/web/els.wasm)
+const css565 = (c) => `rgb(${(((c >> 11) & 31) * 255) / 31 | 0},${(((c >> 5) & 63) * 255) / 63 | 0},${((c & 31) * 255) / 31 | 0})`;
+let memory = null;
+const cString = (ptr) => { const u8 = new Uint8Array(memory.buffer); let s = ''; while (u8[ptr]) s += String.fromCharCode(u8[ptr++]); return s; };
+const env = {
+  js_fill_rect(x, y, w, h, c) { tft.fillStyle = css565(c); tft.fillRect(x, y, w, h); },
+  js_text(x, y, ptr, size, fg, bg) {   // same 6 x 8 cell grid as the ILI9341_t3 font
+    const s = cString(ptr);
+    tft.fillStyle = css565(bg); tft.fillRect(x, y, s.length * 6 * size, 8 * size);
+    tft.fillStyle = css565(fg); tft.font = `bold ${Math.round(8.4 * size)}px Menlo, ui-monospace, monospace`; tft.textBaseline = 'top';
+    for (let i = 0; i < s.length; i++) tft.fillText(s[i], x + i * 6 * size + 0.4 * size, y + 0.2 * size);
+  },
+};
+const { instance } = await WebAssembly.instantiate(new Uint8Array(BLOB, DATA.wasm[0], DATA.wasm[1]).slice(), { env });
+const w = instance.exports; memory = w.memory;
+w.sim_init(40, 600, PITCH * 1000);
+const status = () => {
+  const f = new Float32Array(memory.buffer, w.sim_status(), 16);
+  return { pos: f[0], nut: f[2], fault: f[3], mode: f[8], lead: f[10], simRpm: f[13] };
+};
+
+// ---------------------------------------------------------------- inputs: click the panel, or the keyboard
+const $ = (id) => document.getElementById(id);
+const held = {}, longTimers = {};
+function down(b) { if (held[b]) return; held[b] = true; w.sim_press(b); longTimers[b] = setTimeout(() => held[b] && w.sim_long(b), 1000);
+                   const m = keyMeshes[b]; if (m) m.position.z = m.userData.z - 1.2; }
+function up(b) { if (!held[b]) return; held[b] = false; clearTimeout(longTimers[b]); w.sim_release(b);
+                 const m = keyMeshes[b]; if (m) m.position.z = m.userData.z; }
+let estopOn = false, knobAngle = 0;
+const applyInputs = () => { w.sim_set_inputs(estopOn ? 1 : 0, 0); estop.position.z = PT - (estopOn ? 5 : 0); };
+const turn = (d) => { w.sim_knob(d); knobAngle -= d * Math.PI / 10; knob.rotation.z = knobAngle; };
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let pressed = null;
+function hit(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  return ray.intersectObjects(clickables, false)[0];
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  const h = hit(e); if (!h || e.button !== 0) return;
+  controls.enabled = false; const u = h.object.userData;
+  if (u.btn !== undefined) { down(u.btn); pressed = u.btn; }
+  else if (u.estop) { estopOn = !estopOn; applyInputs(); }
+  else if (u.knob) {
+    const p = knob.worldToLocal(h.point.clone());
+    if (Math.hypot(p.x, p.y) < 4.5) { w.sim_press(9); w.sim_release(9); } else turn(p.x > 0 ? 1 : -1);
+  }
+});
+window.addEventListener('pointerup', () => { if (pressed !== null) up(pressed); pressed = null; controls.enabled = true; });
+renderer.domElement.addEventListener('wheel', (e) => {
+  const h = hit(e); if (!h || !h.object.userData.knob) return;
+  e.preventDefault(); e.stopImmediatePropagation(); turn(e.deltaY > 0 ? -1 : 1);
+}, { capture: true, passive: false });
+const KEYMAP = { n: 0, m: 1, u: 2, d: 3, '[': 4, ']': 5, ArrowLeft: 6, ArrowRight: 7, r: 8, k: 9 };
+window.addEventListener('keydown', (e) => {
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k in KEYMAP) { e.preventDefault(); if (!e.repeat) down(KEYMAP[k]); }
+  else if (k === '-' || k === '=') turn(k === '=' ? 1 : -1);
+  else if (k === ' ') { e.preventDefault(); spindleOn ? stopSpindle() : startSpindle(spindleDir); }
+  else if (k === 'x') { estopOn = !estopOn; applyInputs(); }
+});
+window.addEventListener('keyup', (e) => { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; if (k in KEYMAP) up(KEYMAP[k]); });
+
+// lathe spindle: its own door switch stops it when the gear door opens and will not let it start while the door is open
+let spindleOn = false, spindleDir = 1, doorOpen = false, doorAngle = 0, notice = '', noticeUntil = 0;
+const applySpindle = () => { const v = +$('rpm').value; $('rpmVal').textContent = `${v} rpm`; w.sim_set_spindle(spindleOn ? v * spindleDir : 0, 600); };
+const say = (t) => { notice = t; noticeUntil = performance.now() + 4000; };
+function startSpindle(dir) {
+  if (doorOpen) { say("Gear door open: the lathe's door switch will not let the spindle start."); return; }
+  spindleOn = true; spindleDir = dir; noticeUntil = 0; applySpindle();
+}
+function stopSpindle() { spindleOn = false; applySpindle(); }
+$('rpm').oninput = applySpindle;
+$('spinFwd').onclick = () => startSpindle(1);
+$('spinRev').onclick = () => startSpindle(-1);
+$('spinStop').onclick = stopSpindle;
+applySpindle();
+$('doorBtn').onclick = () => {
+  doorOpen = !doorOpen; $('doorBtn').textContent = doorOpen ? 'Close gear door' : 'Open gear door';
+  if (!doorOpen) noticeUntil = 0;
+  if (doorOpen && spindleOn) { stopSpindle(); say("Gear door opened: the lathe's door switch stopped the spindle (the ELS follows it to a stop)."); }
+  if (curView === 'gear') setView('gear');
+};
+$('labels').onchange = () => { if (!userMoved) setView(curView); };
+$('xray').onchange = (e) => { doorMat.opacity = e.target.checked ? 0.12 : 1; doorMat.depthWrite = !e.target.checked; doorMat.needsUpdate = true; };
+
+// ---------------------------------------------------------------- views: each fits its subject, whatever the window shape
+const DOOR_SWEEP = new THREE.Box3(new THREE.Vector3(-400, -95, 0), new THREE.Vector3(60, 265, 370));
+const E_DOOR_OPEN = new THREE.Box3().setFromPoints([new THREE.Vector3(-75 - EW / 2 - 60, -450, -15), new THREE.Vector3(-75 - EW / 2, -150, 140 + EW * 0.95)]);
+const VIEWS = {
+  overview: { dir: [1.0, 0.55, 0.8], parts: () => [root.lathe, cbox, ebox, root.cables], pad: 1.0 },
+  operator: { dir: [1, 0.3, 0.06], parts: () => [root.lathe, cbox], pad: 1.0 },
+  gear:     { dir: [0.3, 0.25, 1], parts: () => [root.drive, doorPivot], extra: () => (doorOpen ? DOOR_SWEEP : null), pad: 1.0 },
+  box:      { dir: [1, 0.22, -0.32], parts: () => [cbox], pad: 1.04 },
+  ebox:     { dir: [0.3, 0.2, 1], parts: () => [ebox], extra: () => E_DOOR_OPEN, pad: 1.0 },
+};
+let curView = 'overview';
+function setView(v) {
+  curView = v; tagView = v;
+  const V = VIEWS[v], b = new THREE.Box3();
+  for (const o of V.parts()) b.expandByObject(o);
+  const ex = V.extra && V.extra(); if (ex) b.union(ex);
+  const c = b.getCenter(new THREE.Vector3()), d = new THREE.Vector3(...V.dir).normalize();
+  subject = b; userMoved = false;
+  const hx = $('labels').checked && TAGS.some((t) => t.views.includes(v)) ? Math.max(0.36, 1 - 2 * (stage.clientWidth - 32 < 560 ? 118 : 175) / Math.max(300, stage.clientWidth - 32)) : 0.92;
+  const corners = []; for (let i = 0; i < 8; i++) corners.push(new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z));
+  let dist = b.getSize(new THREE.Vector3()).length() * 1.5;
+  for (let it = 0; it < 6; it++) {                                    // move in or out until the box just fits (with V.pad margin)
+    camera.position.copy(c).addScaledVector(d, dist); camera.lookAt(c); camera.near = Math.max(1, dist / 60); camera.far = dist * 30;
+    camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+    let m = 0; for (const p of corners) { const q = p.clone().project(camera); m = Math.max(m, Math.abs(q.x) / hx, Math.abs(q.y) / 0.9); }
+    dist *= 0.15 + 0.85 * m * V.pad;
+  }
+  controls.target.copy(c); camera.position.copy(c).addScaledVector(d, dist); controls.update();
+  document.querySelectorAll('[data-view]').forEach((el) => el.classList.toggle('on', el.dataset.view === v));
+}
+document.querySelectorAll('[data-view]').forEach((el) => (el.onclick = () => setView(el.dataset.view)));
+
+const legend = $('legend');
+legend.innerHTML = Object.values(PARTS).filter((p) => p[1]).map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join('') +
+  `<span><i style="background:#2c3038"></i>control box (printed, cad/control_box.scad)</span><span><i style="background:#b9bec5"></i>electrical box</span>` +
+  `<span><i style="background:#5b6068"></i>motor power</span><span><i style="background:#1b1c1f"></i>motor / spindle encoder</span>` +
+  `<span><i style="background:#2b4f86"></i>signals</span><span><i style="background:#8c2b2b"></i>5 V + E-stop / K1</span>` +
+  `<span><i style="background:#3f9b3f"></i>PE</span><span><i style="background:#2f6fb5"></i>lathe (approximate)</span>`;
+
+function resize() {
+  const ww = stage.clientWidth - 32, hh = stage.clientHeight - 32;
+  renderer.setSize(ww, hh, false); camera.aspect = ww / hh; camera.updateProjectionMatrix();
+}
+let userMoved = false;
+controls.addEventListener('start', () => { userMoved = true; });
+new ResizeObserver(() => { resize(); if (!userMoved) setView(curView); }).observe(stage);
+resize(); setView('overview');
+
+// ---------------------------------------------------------------- run
+const NUTS = ['open', 'ARMED (waiting for the groove)', 'ENGAGED'];
+let last = performance.now(), simMs = 0, spRevs = 0, blink = 0;
+w.sim_render(0, 1);
+renderer.setAnimationLoop((now) => {
+  let dt = Math.min(now - last, 50); last = now;
+  if ($('slowmo').checked) dt *= 0.2;
+  simMs += dt; w.sim_run(dt);
+  const st = status();
+  spRevs += st.simRpm / 60 * dt / 1000;
+  // motion: carriage from the firmware's position; leadscrew and motor from it; stud, encoder, chuck and the lathe's belt from the spindle
+  const lsTurns = st.pos / PITCH;
+  carriage.position.z = Z_TOOL0 - st.pos;
+  leadscrew.rotation.z = lsTurns * 2 * Math.PI;
+  pivots.pulley40.rotation.z = lsTurns * 2 * Math.PI;
+  pivots.pulley20htd.rotation.z = lsTurns * 4 * Math.PI;
+  pivots.pulley60.rotation.z = -spRevs * 2 / 9 * 2 * Math.PI;
+  pivots.pulley20gt2.rotation.z = -spRevs * 2 / 3 * 2 * Math.PI;
+  chuck.rotation.z = -spRevs * 2 * Math.PI;
+  lathePulleys[0][0].rotation.z = -spRevs * 2 * 2 * Math.PI;            // headstock input pulley (gear ratio not known: shown at 2x)
+  lathePulleys[1][0].rotation.z = -spRevs * 2 * 51 / 32 * 2 * Math.PI;  // motor pulley, by the pulley diameters
+  // panel lamps: NUT ring lit when engaged, blinking amber while armed; FAULT LED
+  blink = (blink + dt) % 400;
+  const armed = st.nut === 1, engaged = st.nut === 2, on = blink < 200;
+  nutRingM.color.set(engaged ? '#3cf07a' : armed && on ? '#ffb020' : '#1d4d2c');
+  nutRingM.emissive.set(engaged ? '#2fd068' : armed && on ? '#d08a10' : '#000000');
+  ledM.emissive.set(st.fault ? '#ff3b30' : '#000000'); ledM.color.set(st.fault ? '#ff4d40' : '#4a1410');
+  w.sim_render(simMs, 0); tftTex.needsUpdate = true;
+  doorAngle += ((doorOpen ? -1.75 : 0) - doorAngle) * 0.12; doorPivot.rotation.y = doorAngle;
+  eDoorAngle += ((curView === 'ebox' ? -1.9 : 0) - eDoorAngle) * 0.1; eDoor.rotation.y = eDoorAngle;
+  const s = $('status');
+  const showNote = now < noticeUntil;
+  s.className = 'status' + (showNote || doorOpen || st.fault ? ' warn' : '');
+  s.textContent = (showNote ? notice + '\n' : '') +
+    `${st.mode === 1 ? 'THREAD' : 'FEED'} ${Math.abs(st.lead).toFixed(3)} mm · carriage ${st.pos.toFixed(3)} mm · spindle ${st.simRpm.toFixed(0)} rpm · ` +
+    `nut ${NUTS[st.nut] || st.nut}${st.fault ? ' · FAULT' : ''}${estopOn ? ' · E-STOP pressed' : ''}${doorOpen ? ' · gear door OPEN (spindle locked out)' : ''}`;
+  controls.update(); renderer.render(scene, camera); placeTags();
+});
+</script>
+</body>
+</html>

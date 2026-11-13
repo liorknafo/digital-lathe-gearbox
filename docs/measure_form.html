@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roher TBL-20/520 — what to measure</title>
+<style>
+  :root {
+    --fg: var(--foreground, #1d1d1f); --mut: var(--muted-foreground, #6b6b70); --bd: var(--border, #d0d0d6);
+    --cardc: var(--card, #f6f6f8); --acc: var(--primary, #2563eb); --dim: #e8590c;
+    --steel: #9aa3ad; --brown: #8a3b2e; --hatch: #7d8794;
+  }
+  body { margin: 0; font-family: var(--font-sans, system-ui, sans-serif); color: var(--fg); }
+  .wrap { max-width: 728px; }
+  h2 { font-size: 17px; margin: 22px 0 6px; }
+  p, li { font-size: 14px; line-height: 1.45; }
+  .how { background: var(--cardc); border: 1px solid var(--bd); border-radius: var(--radius, 8px); padding: 12px 16px; }
+  .how ol { margin: 4px 0 0; padding-left: 20px; }
+  svg { width: 100%; height: auto; display: block; margin: 6px 0 4px; }
+  svg text { font-family: var(--font-sans, system-ui, sans-serif); fill: var(--fg); font-size: 13px; }
+  svg .tag { fill: var(--dim); font-weight: 700; font-size: 15px; }
+  svg .small { font-size: 11px; fill: var(--mut); }
+  .dimln { stroke: var(--dim); stroke-width: 1.6; fill: none; }
+  .ext { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 4 3; fill: none; }
+  .outline { stroke: var(--fg); stroke-width: 1.4; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td { border-top: 1px solid var(--bd); padding: 7px 6px; vertical-align: middle; }
+  td.id { font-weight: 700; color: var(--dim); width: 34px; }
+  td.what small { color: var(--mut); display: block; font-size: 12px; }
+  input, select { width: 92px; padding: 5px 6px; font-size: 14px; border: 1px solid var(--bd); border-radius: 6px;
+    background: var(--background, #fff); color: var(--fg); font-family: var(--font-mono, monospace); }
+  select { width: 104px; font-family: inherit; }
+  td.u { color: var(--mut); width: 30px; }
+  textarea { width: 100%; box-sizing: border-box; height: 300px; font-family: var(--font-mono, monospace); font-size: 12.5px;
+    border: 1px solid var(--bd); border-radius: 6px; padding: 8px; background: var(--code-background, #f4f4f6); color: var(--fg); }
+  button { font-size: 14px; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--acc); background: var(--acc);
+    color: var(--primary-foreground, #fff); cursor: pointer; }
+  .note { font-size: 12.5px; color: var(--mut); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="how">
+  <b>One rule for every height:</b> measure from the <b>flat face of the blue panel</b>. A number is <b>+</b> if the part sticks out
+  towards you, and <b>−</b> if it sits behind the panel face (in a recess).
+  <ol>
+    <li><b>Heights</b> (orange letters on the side views): rest the <b>end of the caliper</b> on the part's face, keep the caliper square
+      to the panel, and push the <b>depth rod</b> down onto the blue panel. Read the number.</li>
+    <li><b>Diameters and thickness</b>: use the big jaws.</li>
+    <li>Take the <b>leadscrew gear</b> and the <b>21T stud gear</b> off first (you did that for the photos already).</li>
+    <li>Leave any box empty if you can't reach it. The grey numbers are my estimates from your photos.</li>
+  </ol>
+</div>
+
+<h2>1 · Leadscrew end and banjo (brown arm), seen from the side</h2>
+<svg viewBox="0 0 720 440" aria-label="Leadscrew end side view">
+  <defs>
+    <pattern id="h" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="8" stroke="var(--hatch)" stroke-width="1.2"/>
+    </pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--dim)"/></marker>
+  </defs>
+  <!-- panel / casting -->
+  <rect x="30" y="30" width="110" height="370" fill="url(#h)" opacity="0.55"/>
+  <line x1="140" y1="22" x2="140" y2="425" stroke="#2f6fd6" stroke-width="4"/>
+  <text x="34" y="22" class="small">blue panel / casting</text>
+  <text x="146" y="436" style="fill:#2f6fd6;font-weight:700">blue panel face = 0</text>
+  <!-- boss through the banjo -->
+  <rect x="40" y="146" width="118" height="108" fill="var(--steel)" opacity="0.55" class="outline"/>
+  <!-- banjo, cut through the middle -->
+  <rect x="142" y="96" width="16" height="50" fill="var(--brown)" class="outline"/>
+  <rect x="142" y="254" width="16" height="104" fill="var(--brown)" class="outline"/>
+  <text x="100" y="90" style="fill:var(--brown);font-weight:700">banjo (on the panel)</text>
+  <!-- collar -->
+  <rect x="158" y="134" width="32" height="132" fill="#b9c0c8" class="outline"/>
+  <text x="196" y="126" class="small">collar</text>
+  <!-- shaft end -->
+  <rect x="190" y="158" width="104" height="84" fill="#cfd5db" class="outline"/>
+  <rect x="200" y="150" width="88" height="8" fill="#6d747c" class="outline"/>
+  <text x="300" y="148" class="small">key</text>
+  <line x1="262" y1="188" x2="294" y2="188" stroke="var(--fg)" stroke-dasharray="3 3"/>
+  <line x1="262" y1="212" x2="294" y2="212" stroke="var(--fg)" stroke-dasharray="3 3"/>
+  <text x="198" y="205" class="small">shaft end</text>
+  <!-- clamp bolt: washer + hex head on the banjo face -->
+  <rect x="158" y="282" width="8" height="56" fill="#c9ced4" class="outline"/>
+  <rect x="166" y="290" width="26" height="40" fill="#aab1b9" class="outline"/>
+  <line x1="90" y1="300" x2="158" y2="300" stroke="var(--fg)" stroke-dasharray="4 3"/>
+  <line x1="90" y1="320" x2="158" y2="320" stroke="var(--fg)" stroke-dasharray="4 3"/>
+  <text x="198" y="315" class="small">clamp bolt + washer</text>
+
+  <!-- L5 shaft end height -->
+  <line class="ext" x1="294" y1="158" x2="294" y2="44"/>
+  <line class="dimln" x1="140" y1="52" x2="294" y2="52" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="300" y="57" class="tag">L5</text><text x="326" y="57" class="small">shaft end</text>
+  <!-- L4 collar face height -->
+  <line class="ext" x1="190" y1="134" x2="190" y2="70"/>
+  <line class="dimln" x1="140" y1="78" x2="190" y2="78" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="196" y="83" class="tag">L4</text><text x="222" y="83" class="small">collar front face</text>
+  <!-- B2 banjo thickness -->
+  <line class="ext" x1="142" y1="358" x2="142" y2="372"/>
+  <line class="ext" x1="158" y1="358" x2="158" y2="372"/>
+  <line class="dimln" x1="142" y1="366" x2="158" y2="366" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="112" y="371" class="tag">B2</text>
+  <!-- B1 banjo front face height -->
+  <line class="ext" x1="158" y1="372" x2="158" y2="396"/>
+  <line class="dimln" x1="140" y1="390" x2="158" y2="390" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="164" y="395" class="tag">B1</text><text x="190" y="395" class="small">banjo front face</text>
+  <!-- B4 bolt head top -->
+  <line class="ext" x1="192" y1="330" x2="192" y2="420"/>
+  <line class="dimln" x1="140" y1="414" x2="192" y2="414" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="198" y="419" class="tag">B4</text><text x="224" y="419" class="small">top of the bolt head</text>
+  <!-- L1 shaft diameter -->
+  <line class="ext" x1="294" y1="158" x2="420" y2="158"/>
+  <line class="ext" x1="294" y1="242" x2="420" y2="242"/>
+  <line class="dimln" x1="412" y1="158" x2="412" y2="242" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="420" y="205" class="tag">L1</text>
+  <!-- L3 collar diameter -->
+  <line class="ext" x1="190" y1="134" x2="480" y2="134"/>
+  <line class="ext" x1="190" y1="266" x2="480" y2="266"/>
+  <line class="dimln" x1="472" y1="134" x2="472" y2="266" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="480" y="205" class="tag">L3</text>
+
+  <!-- front view inset -->
+  <g transform="translate(610,200)">
+    <text x="-62" y="-104" class="small">front view</text>
+    <circle r="66" fill="#b9c0c8" class="outline"/>
+    <circle r="42" fill="#cfd5db" class="outline"/>
+    <circle r="12" fill="var(--fg)" opacity="0.75"/>
+    <rect x="-12" y="-50" width="24" height="12" fill="#6d747c" class="outline"/>
+    <line class="ext" x1="-12" y1="-50" x2="-12" y2="-84"/>
+    <line class="ext" x1="12" y1="-50" x2="12" y2="-84"/>
+    <line class="dimln" x1="-30" y1="-78" x2="-12" y2="-78" marker-end="url(#a)"/>
+    <line class="dimln" x1="30" y1="-78" x2="12" y2="-78" marker-end="url(#a)"/>
+    <text x="34" y="-73" class="tag">L2</text>
+    <text x="-46" y="84" class="small">L1 = small circle</text>
+    <text x="-46" y="98" class="small">L3 = big circle</text>
+  </g>
+</svg>
+
+<h2>2 · Change-gear stud (21T removed) and spindle bearing cap, side view</h2>
+<svg viewBox="0 0 720 300" aria-label="Stud and spindle cap side view">
+  <defs>
+    <pattern id="h2" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="8" stroke="var(--hatch)" stroke-width="1.2"/></pattern>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--dim)"/></marker>
+  </defs>
+  <!-- stud -->
+  <rect x="30" y="40" width="110" height="200" fill="url(#h2)" opacity="0.55"/>
+  <line x1="140" y1="30" x2="140" y2="270" stroke="#2f6fd6" stroke-width="4"/>
+  <text x="146" y="290" style="fill:#2f6fd6;font-weight:700">blue panel face = 0</text>
+  <rect x="140" y="95" width="46" height="110" fill="#b9c0c8" class="outline"/>
+  <text x="128" y="88" class="small">shoulder / spacer the 21T sat on</text>
+  <rect x="186" y="108" width="96" height="84" fill="#cfd5db" class="outline"/>
+  <rect x="196" y="100" width="80" height="8" fill="#6d747c" class="outline"/>
+  <text x="200" y="155" class="small">stud</text>
+  <line class="ext" x1="282" y1="108" x2="282" y2="44"/>
+  <line class="dimln" x1="140" y1="52" x2="282" y2="52" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text x="288" y="57" class="tag">S4</text><text x="314" y="57" class="small">stud end</text>
+  <line class="ext" x1="186" y1="205" x2="186" y2="252"/>
+  <line class="dimln" x1="140" y1="246" x2="186" y2="246" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text x="192" y="251" class="tag">S3</text><text x="218" y="251" class="small">face the 21T sat against</text>
+  <line class="ext" x1="282" y1="108" x2="330" y2="108"/>
+  <line class="ext" x1="282" y1="192" x2="330" y2="192"/>
+  <line class="dimln" x1="322" y1="108" x2="322" y2="192" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text x="330" y="155" class="tag">S1</text>
+  <line class="dimln" x1="163" y1="95" x2="163" y2="205" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text x="96" y="155" class="tag">S5</text><text x="64" y="172" class="small">shoulder dia</text>
+
+  <!-- spindle cap -->
+  <g transform="translate(400,0)">
+    <rect x="0" y="40" width="70" height="200" fill="url(#h2)" opacity="0.55"/>
+    <line x1="70" y1="30" x2="70" y2="270" stroke="#2f6fd6" stroke-width="4"/>
+    <rect x="70" y="60" width="44" height="160" fill="#3a3d42" class="outline"/>
+    <text x="74" y="54" class="small">black bearing cap (incl. screw heads)</text>
+    <rect x="114" y="110" width="22" height="60" fill="#8e959c" class="outline"/>
+    <text x="142" y="146" class="small">spindle end / ring</text>
+    <line class="ext" x1="114" y1="220" x2="114" y2="252"/>
+    <line class="dimln" x1="70" y1="246" x2="114" y2="246" marker-start="url(#b)" marker-end="url(#b)"/>
+    <text x="120" y="251" class="tag">P1</text>
+    <line class="ext" x1="136" y1="170" x2="136" y2="272"/>
+    <line class="dimln" x1="70" y1="266" x2="136" y2="266" marker-start="url(#b)" marker-end="url(#b)"/>
+    <text x="142" y="271" class="tag">P2</text>
+    <line class="ext" x1="114" y1="60" x2="250" y2="60"/>
+    <line class="ext" x1="114" y1="220" x2="250" y2="220"/>
+    <line class="dimln" x1="242" y1="60" x2="242" y2="220" marker-start="url(#b)" marker-end="url(#b)"/>
+    <text x="250" y="145" class="tag">P3</text>
+  </g>
+</svg>
+
+<h2>3 · Type the values (mm)</h2>
+<table id="form"></table>
+<p class="note">Drawings are not to scale. Values save in this browser as you type.</p>
+
+<h2>4 · Send me this</h2>
+<p class="note">Press the button, then paste the text into the chat (or select it all and copy).</p>
+<p><button id="copy">Copy for the chat</button> <span id="msg" class="note"></span></p>
+<textarea id="out" readonly></textarea>
+</div>
+
+<script>
+const F = [
+  ["", "Leadscrew end (gear off)"],
+  ["L1", "Leadscrew shaft diameter", "jaws across the round part, not across the key", "14.0", "mm"],
+  ["L2", "Key width", "the key in the shaft (or the slot if the key falls out)", "4.0", "mm"],
+  ["L3", "Collar diameter", "the round shoulder the gear sat against", "22", "mm"],
+  ["L4", "Collar front face height", "from the blue panel face (+ = towards you)", "?", "mm"],
+  ["L5", "Shaft end height", "from the blue panel face", "?", "mm"],
+  ["L6", "Does the collar turn with the shaft?", "turn the leadscrew by hand and watch the collar", ["", "yes", "no", "not sure"], ""],
+  ["", "Banjo (brown arm)"],
+  ["B1", "Banjo front face height", "from the blue panel face; − if it sits in a recess", "?", "mm"],
+  ["B2", "Banjo thickness", "jaws over its edge, near a clamp bolt", "8", "mm"],
+  ["B3", "Clamp bolt thread", "hex 10 mm = M6, hex 13 mm = M8 (photo says ~10 mm)", ["", "M6", "M8", "other"], ""],
+  ["B4", "Bolt head top height", "top of the hex head, from the blue panel face", "?", "mm"],
+  ["", "Change-gear stud (21T off)"],
+  ["S1", "Stud diameter", "jaws across the round part", "14.0", "mm"],
+  ["S2", "Stud key width", "", "4.0", "mm"],
+  ["S3", "Height of the face the 21T sat against", "from the blue panel face", "?", "mm"],
+  ["S4", "Stud end height", "from the blue panel face", "?", "mm"],
+  ["S5", "Shoulder diameter", "the face the 21T sat against", "?", "mm"],
+  ["", "Spindle end (black bearing cap)"],
+  ["P1", "Bearing cap height", "highest point incl. the screw heads, from the blue panel face", "?", "mm"],
+  ["P2", "Spindle end height", "the ring / nose inside the cap, from the blue panel face", "?", "mm"],
+  ["P3", "Bearing cap diameter", "", "88", "mm"],
+  ["", "Door and motor"],
+  ["D1", "Door depth", "blue panel face to the inside of the closed door (you said 65 — from where?)", "65", "mm"],
+  ["M1", "Motor length (datasheet)", "flange face to the back of the encoder cover; skip if not bought yet", "81", "mm"],
+];
+const tbl = document.getElementById("form"), out = document.getElementById("out");
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem("roher_measure") || "{}"); } catch (e) {}
+for (const f of F) {
+  const tr = tbl.insertRow();
+  if (!f[0]) { const td = tr.insertCell(); td.colSpan = 4; td.innerHTML = "<b>" + f[1] + "</b>"; continue; }
+  tr.insertCell().className = "id"; tr.cells[0].textContent = f[0];
+  const w = tr.insertCell(); w.className = "what"; w.innerHTML = f[1] + (f[2] ? "<small>" + f[2] + "</small>" : "");
+  const c = tr.insertCell(); let el;
+  if (Array.isArray(f[3])) {
+    el = document.createElement("select");
+    for (const o of f[3]) { const op = document.createElement("option"); op.value = o; op.textContent = o || "—"; el.appendChild(op); }
+  } else {
+    el = document.createElement("input"); el.type = "text"; el.inputMode = "decimal"; el.placeholder = f[3];
+  }
+  el.id = f[0]; el.value = saved[f[0]] || ""; el.addEventListener("input", update); c.appendChild(el);
+  tr.insertCell().className = "u"; tr.cells[3].textContent = f[4];
+}
+function update() {
+  const vals = {}, lines = ["Roher TBL-20/520 measurements (mm; heights from the blue panel face, + = towards the door)"];
+  for (const f of F) {
+    if (!f[0]) { lines.push("", "# " + f[1]); continue; }
+    const v = document.getElementById(f[0]).value.trim().replace(",", ".");
+    vals[f[0]] = v;
+    lines.push(f[0] + " " + f[1] + ": " + (v || "?"));
+  }
+  try { localStorage.setItem("roher_measure", JSON.stringify(vals)); } catch (e) {}
+  out.value = lines.join("\n");
+}
+document.getElementById("copy").onclick = async () => {
+  update(); out.select();
+  let ok = false;
+  try { await navigator.clipboard.writeText(out.value); ok = true; } catch (e) { try { ok = document.execCommand("copy"); } catch (e2) {} }
+  document.getElementById("msg").textContent = ok ? "Copied — paste it in the chat." : "Select the text below and copy it.";
+};
+update();
+</script>
+</body>
+</html>

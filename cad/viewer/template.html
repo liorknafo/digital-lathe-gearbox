@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roher TBL-20/520 electronic leadscrew drive - 3D</title>
+<style>
+  .els { font-family: var(--font-sans, system-ui, sans-serif); color: var(--foreground, #e6e6e6); }
+  .els .stage { position: relative; height: 470px; padding: 16px; border-radius: var(--radius, 10px);
+                background: var(--card, #1c1e24); }
+  .els .stage canvas { display: block; width: 100%; height: 100%; border-radius: calc(var(--radius, 10px) - 4px); }
+  .els .hint { position: absolute; left: 26px; bottom: 22px; font-size: 11px; opacity: .65; pointer-events: none; }
+  .els .bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 10px 0 6px; font-size: 13px; }
+  .els button { font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; border-radius: var(--radius, 8px);
+                border: 1px solid var(--border, #444); background: var(--secondary, #2a2d35); color: var(--secondary-foreground, #eee); }
+  .els button.on { background: var(--primary, #4f8cff); color: var(--primary-foreground, #fff); border-color: transparent; }
+  .els label { display: inline-flex; align-items: center; gap: 6px; }
+  .els input[type=range] { width: 120px; }
+  .els .val { font-family: var(--font-mono, ui-monospace, monospace); min-width: 52px; display: inline-block; }
+  .els .status { font-size: 13px; padding: 8px 12px; border-radius: var(--radius, 8px); margin-top: 4px;
+                 border: 1px solid var(--border, #444); }
+  .els .status.fail { border-color: var(--destructive, #e5484d); background: var(--destructive-surface, rgba(229,72,77,.12)); }
+  .els .status.warn { border-color: var(--warning, #f5a524); background: var(--warning-surface, rgba(245,165,36,.12)); }
+  .els .status.ok { border-color: var(--success, #30a46c); }
+  .els .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: 10px; opacity: .9; }
+  .els .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="els">
+  <div class="stage" id="stage"><div class="hint">drag = rotate · right-drag = pan · wheel = zoom</div></div>
+
+  <div class="bar">
+    <span>View</span>
+    <button data-view="iso" class="on">3D</button>
+    <button data-view="front">Front</button>
+    <button data-view="side">Side</button>
+    <button data-view="below">From below</button>
+    <span style="width:8px"></span>
+    <button id="doorBtn">Open door</button>
+    <label><input type="checkbox" id="xray" checked> see-through door</label>
+  </div>
+  <div class="bar">
+    <label>Door depth <input type="range" id="depth" min="60" max="180" step="1"> <span class="val" id="depthVal"></span></label>
+    <label>Motor length <input type="range" id="mlen" min="50" max="140" step="1"> <span class="val" id="mlenVal"></span></label>
+  </div>
+  <div class="status" id="status"></div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const DATA = /*__DATA__*/null;
+const N = DATA.nums;
+
+// ---------------------------------------------------------------- parts
+const PARTS = {
+  plate:       ['#d9a521', 'base plate (aluminium)', 0.3],
+  bracket:     ['#3d7fd0', 'encoder bracket (printed)', 0.0],
+  pulley40:    ['#f08c1a', 'HTD-3M 40T / 20T pulleys', 0.3],
+  pulley20htd: ['#f08c1a', null, 0.3],
+  pulley60:    ['#79c96b', 'GT2 60T / 20T pulleys', 0.1],
+  pulley20gt2: ['#79c96b', null, 0.1],
+  belts:       ['#26282c', 'belts', 0.0],
+  motor:       ['#aeb4bd', 'closed-loop NEMA23', 0.6],
+  encoder:     ['#d2d6dc', 'LPD3806 encoder', 0.6],
+  standoffs:   ['#6f7f90', 'M5 standoffs', 0.6],
+  stud_ring:   ['#c78545', 'stud ring', 0.1],
+  shafts:      ['#d0d4da', 'shafts', 0.7],
+  hardware:    ['#4a4f57', 'screws / washers', 0.5],
+  cap:         ['#3a3d42', 'spindle bearing cap', 0.3],
+  spindle:     ['#80858c', null, 0.5],
+  switch:      ['#d8382f', 'door switch', 0.1],
+  plunger:     ['#d23ad8', null, 0.1],
+};
+const PANEL = '#2f6fb5';
+
+// Gear end panel outline (mm, origin = leadscrew axis), traced from the photo: approximate.
+const OUTLINE = [[-310.4, -92.6], [53.2, -92.6], [53.2, 125.3], [-27, 264.3], [-235.6, 264.3], [-310.4, 181.4]];
+const HINGE_X = -310.4;
+
+// ---------------------------------------------------------------- scene
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(32, 1, 5, 10000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x50555e, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(300, 500, 700); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-500, -200, 300); scene.add(fill);
+
+function bytes(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
+// All meshes share one byte stream: gzip+base64 in the page, or the RGB pixels of a PNG.
+async function pngBytes(img) {
+  await img.decode();
+  const bmp = await createImageBitmap(img, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  const c = new OffscreenCanvas(bmp.width, bmp.height), ctx = c.getContext('2d');
+  ctx.drawImage(bmp, 0, 0);
+  const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data, rgb = new Uint8Array(bmp.width * bmp.height * 3);
+  for (let i = 0, j = 0; i < px.length; i += 4) { rgb[j++] = px[i]; rgb[j++] = px[i + 1]; rgb[j++] = px[i + 2]; }
+  const len = rgb[0] | (rgb[1] << 8) | (rgb[2] << 16) | (rgb[3] << 24);
+  return rgb.buffer.slice(4, 4 + len);
+}
+const BLOB = DATA.png ? await pngBytes(document.getElementById(DATA.png))
+  : await new Response(new Blob([bytes(DATA.blob)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+// Positions: x, y, z planes; positions and indices are both stored as int16 deltas.
+function undelta(offset, count) {
+  const d = new DataView(BLOB, offset, count * 2), out = new Int32Array(count);
+  let v = 0;
+  for (let i = 0; i < count; i++) { v += d.getInt16(i * 2, true); out[i] = v; }
+  return out;
+}
+function decode(m) {
+  const planar = undelta(m.pos[0], m.pos[1]), n = m.pos[1] / 3, p = new Float32Array(m.pos[1]);
+  for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) p[i * 3 + a] = planar[a * n + i] * DATA.grid;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  g.setIndex(new THREE.BufferAttribute(Uint32Array.from(undelta(m.idx[0], m.idx[1])), 1));
+  g.computeVertexNormals();
+  return g;
+}
+const mat = (color, metal = 0.2, extra = {}) =>
+  new THREE.MeshStandardMaterial({ color, metalness: metal, roughness: 0.55, flatShading: true, ...extra });
+
+const meshes = {};
+for (const [name, m] of Object.entries(DATA.meshes)) {
+  const [color, , metal] = PARTS[name] || ['#999', null, 0.2];
+  const mesh = new THREE.Mesh(decode(m), mat(color, metal));
+  meshes[name] = mesh; scene.add(mesh);
+}
+
+// Panel (sheet metal) and the lathe's own drive pulleys, for context.
+const panelShape = new THREE.Shape(OUTLINE.map(([x, y]) => new THREE.Vector2(x, y)));
+const panel = new THREE.Mesh(new THREE.ExtrudeGeometry(panelShape, { depth: 3, bevelEnabled: false }), mat(PANEL, 0.1));
+panel.position.z = -3; scene.add(panel);
+
+function hullPoly(c1, r1, c2, r2, n = 48) {
+  const dx = c2[0] - c1[0], dy = c2[1] - c1[1], d = Math.hypot(dx, dy), base = Math.atan2(dy, dx);
+  const a = Math.acos((r1 - r2) / d), pts = [];
+  for (let i = 0; i <= n; i++) { const t = base + a + (2 * Math.PI - 2 * a) * i / n; pts.push(new THREE.Vector2(c1[0] + r1 * Math.cos(t), c1[1] + r1 * Math.sin(t))); }
+  for (let i = 0; i <= n; i++) { const t = base - a + 2 * a * i / n; pts.push(new THREE.Vector2(c2[0] + r2 * Math.cos(t), c2[1] + r2 * Math.sin(t))); }
+  return pts;
+}
+function disc(c, r, z0, z1, color) {
+  const g = new THREE.CylinderGeometry(r, r, z1 - z0, 64); g.rotateX(Math.PI / 2);
+  const m = new THREE.Mesh(g, mat(color, 0.2)); m.position.set(c[0], c[1], (z0 + z1) / 2); scene.add(m); return m;
+}
+const drive = new THREE.Group(); scene.add(drive);
+{
+  const top = [-151.3, 202.8], bot = [-250.3, -33.8];
+  drive.add(disc(top, 51, 14, 44, '#25272b'), disc(bot, 32, 4, 34, '#25272b'));
+  const ring = new THREE.Shape(hullPoly(bot, 29, top, 48));
+  ring.holes.push(new THREE.Path(hullPoly(bot, 25, top, 44)));
+  const belt = new THREE.Mesh(new THREE.ExtrudeGeometry(ring, { depth: 9, bevelEnabled: false }), mat('#16171a', 0));
+  belt.position.z = 20; drive.add(belt);
+}
+
+// Door: a sheet-metal box over the panel outline, hinged on the left edge.
+const doorPivot = new THREE.Group(); doorPivot.position.x = HINGE_X; scene.add(doorPivot);
+const doorMat = mat(PANEL, 0.1, { side: THREE.DoubleSide, transparent: true, opacity: 0.22, depthWrite: false });
+const edgeMat = new THREE.LineBasicMaterial({ color: '#9cc3ff', transparent: true, opacity: 0.8 });
+const addDoorPart = (mesh) => { doorPivot.add(mesh); const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 30), edgeMat);
+                                e.position.copy(mesh.position); e.rotation.copy(mesh.rotation); doorPivot.add(e); };
+let doorDepth = N.door_depth;
+// Door windows, same rule as cad/lib/layout.scad: hinge-side / top / bottom get a plain gap; the far edge must be at least as far
+// from the hinge axis as the outer back corner of what pokes through, or the door sweeps into it while opening.
+function swingEdgeX(xFar, zFront) {
+  const [hx, hz] = N.hinge, rc = Math.hypot(xFar - hx, zFront - hz), dz = doorDepth - hz;
+  return hx + Math.sqrt(Math.max(0, rc * rc - dz * dz));
+}
+function windowFor(box, zFront) {
+  return [box[0] - N.cut_clear - (N.cable_gap || 0), Math.max(box[1] + N.cut_clear, swingEdgeX(box[1], zFront) + N.swing_margin), box[2] - N.cut_clear_y, box[3] + N.cut_clear_y];
+}
+const rectPath = (x0, x1, y0, y1, P = THREE.Path) => new P([new THREE.Vector2(x0, y0), new THREE.Vector2(x1, y0), new THREE.Vector2(x1, y1), new THREE.Vector2(x0, y1)]);
+const bezelMat = mat('#3b4250', 0.1);
+let windows = [];
+function buildDoor() {
+  doorPivot.clear();
+  const local = OUTLINE.map(([x, y]) => [x - HINGE_X, y]);
+  const face = new THREE.Shape(local.map(([x, y]) => new THREE.Vector2(x, y)));
+  for (const w of windows) face.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
+  const front = new THREE.Mesh(new THREE.ExtrudeGeometry(face, { depth: N.door_t, bevelEnabled: false }), doorMat);
+  front.position.z = doorDepth; addDoorPart(front);
+  for (let i = 0; i < local.length; i++) {
+    const [x0, y0] = local[i], [x1, y1] = local[(i + 1) % local.length];
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(len, N.door_t, doorDepth), doorMat);
+    wall.position.set((x0 + x1) / 2, (y0 + y1) / 2, doorDepth / 2);
+    wall.rotation.z = Math.atan2(y1 - y0, x1 - x0);
+    addDoorPart(wall);
+  }
+  // printed bezel round each window, trimmed to the door's right edge and bottom fold
+  const [bw, bt] = N.bezel, xMax = OUTLINE[1][0], yMin = OUTLINE[0][1];
+  for (const w of windows) {
+    const outer = rectPath(w[0] - bw - HINGE_X, Math.min(w[1] + bw, xMax) - HINGE_X, Math.max(w[2] - bw, yMin), w[3] + bw, THREE.Shape);
+    outer.holes.push(rectPath(w[0] - HINGE_X, w[1] - HINGE_X, w[2], w[3]));
+    const bezel = new THREE.Mesh(new THREE.ExtrudeGeometry(outer, { depth: bt, bevelEnabled: false }), bezelMat);
+    bezel.position.z = doorDepth + N.door_t; doorPivot.add(bezel);
+  }
+}
+
+// Motor length: stretch the motor body in front of its flange face.
+const motorGeom = meshes.motor.geometry, motorZ0 = Float32Array.from(motorGeom.attributes.position.array);
+let motorLen = N.motor_len;
+function setMotorLen() {
+  const p = motorGeom.attributes.position.array, f = N.motor_face_z, s = motorLen / N.motor_len;
+  for (let i = 2; i < p.length; i += 3) p[i] = motorZ0[i] > f + 0.01 ? f + (motorZ0[i] - f) * s : motorZ0[i];
+  motorGeom.attributes.position.needsUpdate = true; motorGeom.computeVertexNormals(); motorGeom.computeBoundingSphere();
+}
+
+// ---------------------------------------------------------------- UI
+const $ = (id) => document.getElementById(id);
+const depth = $('depth'), mlen = $('mlen');
+depth.value = doorDepth; mlen.value = motorLen;
+function update() {
+  doorDepth = +depth.value; motorLen = +mlen.value;
+  $('depthVal').textContent = doorDepth + ' mm'; $('mlenVal').textContent = motorLen + ' mm';
+  const motorFront = N.motor_face_z + motorLen, limit = doorDepth - N.door_clear;
+  windows = [];
+  const lines = [];
+  const guess = doorDepth === N.door_depth ? ` <i>(${N.door_depth} mm is the measured door depth)</i>` : '';
+  if (motorFront > limit) {
+    const w = windowFor(N.motor_box, motorFront); windows.push(w);
+    lines.push(`<b>Motor</b> sticks out ${Math.max(0, motorFront - doorDepth).toFixed(0)} mm through a <b>${(w[1] - w[0]).toFixed(0)} × ${(w[3] - w[2]).toFixed(0)} mm</b> window ` +
+               `(gaps: ${N.cut_clear} mm hinge side, ${N.cut_clear_y} mm top/bottom, <b>${(w[1] - N.motor_box[1]).toFixed(0)} mm</b> on the far side so the door swings past it).`);
+  } else lines.push(`<b>Motor</b> fits inside the door with ${(doorDepth - motorFront).toFixed(0)} mm to spare: no window.`);
+  if (N.enc_front_z > limit) {
+    const w = windowFor(N.enc_box, N.enc_front_z); windows.push(w);
+    lines.push(`<b>Encoder</b> pokes out too: ${(w[1] - w[0]).toFixed(0)} × ${(w[3] - w[2]).toFixed(0)} mm window.`);
+  } else lines.push(`Encoder stays inside (${(doorDepth - N.enc_front_z).toFixed(0)} mm to spare).`);
+  lines.push('The door still closes fully, so the door switch still works.' + guess);
+  buildDoor(); setMotorLen();
+  const st = $('status');
+  st.className = 'status ok';
+  st.innerHTML = lines.join('<br>');
+  meshes.motor.material.emissive.set('#000000');
+}
+depth.oninput = update; mlen.oninput = update;
+$('xray').onchange = (e) => { doorMat.opacity = e.target.checked ? 0.22 : 1; doorMat.depthWrite = !e.target.checked; doorMat.needsUpdate = true; };
+
+let doorOpen = false, doorAngle = 0;
+$('doorBtn').onclick = () => { doorOpen = !doorOpen; $('doorBtn').textContent = doorOpen ? 'Close door' : 'Open door'; };
+
+const TARGET = new THREE.Vector3(-120, 70, 50);
+// [camera offset from TARGET, zoom]: far away + zoomed in = almost no perspective (side view reads like a drawing)
+const VIEWS = {
+  iso:   [new THREE.Vector3(400, 270, 800), 1],
+  front: [new THREE.Vector3(0, 0, 950), 1],
+  side:  [new THREE.Vector3(2600, 0, 0), 3.1],
+  below: [new THREE.Vector3(150, -700, 600), 1],
+};
+function setView(v) {
+  const [off, zoom] = VIEWS[v];
+  camera.up.set(0, 1, 0); camera.zoom = zoom; camera.updateProjectionMatrix();
+  camera.position.copy(TARGET).add(off); controls.target.copy(TARGET); controls.update();
+  document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+}
+document.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+
+const legend = $('legend');
+legend.innerHTML = Object.values(PARTS).filter((p) => p[1]).map(([c, label]) => `<span><i style="background:${c}"></i>${label}</span>`).join('') +
+  `<span><i style="background:${PANEL}"></i>gear end panel + door (outline approx.)</span><span><i style="background:#25272b"></i>lathe's own drive (approx.)</span>`;
+
+function resize() {
+  const w = stage.clientWidth - 32, h = stage.clientHeight - 32;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+resize(); update(); setView('iso');
+
+renderer.setAnimationLoop(() => {
+  const goal = doorOpen ? -1.75 : 0;
+  doorAngle += (goal - doorAngle) * 0.12; doorPivot.rotation.y = doorAngle;
+  controls.update(); renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
