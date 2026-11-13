@@ -197,6 +197,7 @@ def geometric(v):
               {"command": "joint.drive", "params": {"joint": "Motor", "value": 360}},
               {"command": "joint.drive", "params": {"joint": "Stud", "value": 120}},
               {"command": "joint.list", "params": {}}]
+    os.makedirs(os.path.join(sc.BUILD, "scripts"), exist_ok=True)      # a fresh checkout has no cad/build yet
     path = os.path.join(sc.BUILD, "scripts", "_checks.json")
     with open(path, "w") as f:
         json.dump({"commands": steps}, f)
