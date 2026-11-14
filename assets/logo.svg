@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Phase-locked leadscrew">
+<title>Phase-locked leadscrew</title><rect width="1024" height="1024" fill="#101C2D"/>
+<path d="M 672 242 A 314 314 0 1 0 672 782" fill="none" stroke="#35D4C5" stroke-width="58" stroke-linecap="round"/>
+<rect x="730" y="282" width="66" height="66" rx="12" fill="#35D4C5"/>
+<path d="M 254 440 H 754 L 798 484 V 540 L 754 584 H 254 Z" fill="#EDF4FA"/>
+<path d="M 382.5 410 L 297.5 614 M 526.5 410 L 441.5 614 M 670.5 410 L 585.5 614" fill="none" stroke="#101C2D" stroke-width="43"/>
+</svg>
